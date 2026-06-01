@@ -1,0 +1,19 @@
+{
+  "name": "whiteboard-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Real-time collaborative whiteboard (Excalidraw + Socket.IO + MongoDB), served as a single Node service.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace client",
+    "start": "node server/index.js",
+    "dev:server": "node --env-file=server/.env server/index.js",
+    "dev:client": "npm run dev --workspace client"
+  }
+}
