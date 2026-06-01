@@ -18,8 +18,20 @@ export default function ChatBox({ socket, userId, whiteboardId, username, onClos
         setMessages((prev) => [...prev, msg]);
       }
     };
+    // Load the session history for this board (handles opening the panel after
+    // join, and reload/reopen while the board still has people).
+    const historyHandler = (list) => {
+      if (Array.isArray(list)) {
+        setMessages(list.filter((m) => m.whiteboardId === whiteboardId));
+      }
+    };
     socket.on("chatMessage", handler);
-    return () => socket.off("chatMessage", handler);
+    socket.on("chatHistory", historyHandler);
+    socket.emit("requestChatHistory", whiteboardId);
+    return () => {
+      socket.off("chatMessage", handler);
+      socket.off("chatHistory", historyHandler);
+    };
   }, [socket, whiteboardId]);
 
   useEffect(() => {

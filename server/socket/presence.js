@@ -6,6 +6,11 @@
 
 const whiteboardUsers = {}; // { [whiteboardId]: [{ userId, username, socketId }] }
 
+// In-memory chat history per board. Persists while the board has people; we
+// clear it once everyone has left (session-scoped, no DB). Capped per board.
+const chatHistory = {}; // { [whiteboardId]: [msg, ...] }
+const CHAT_MAX = 200;
+
 // Board ids that currently have at least one distinct user present.
 function getActiveBoardIds() {
   const ids = [];
@@ -14,6 +19,10 @@ function getActiveBoardIds() {
     if (distinct.size > 0) ids.push(boardId);
   }
   return ids;
+}
+
+function getChatHistory(whiteboardId) {
+  return chatHistory[whiteboardId] || [];
 }
 
 function registerPresenceHandlers(io, socket) {
@@ -36,9 +45,19 @@ function registerPresenceHandlers(io, socket) {
     socket.to(payload.whiteboardId).emit("cursorUpdate", payload);
   });
 
-  // Chat relay (broadcast to the whole room, sender included).
+  // A late-opening chat panel asks for the current session history.
+  socket.on("requestChatHistory", (whiteboardId) => {
+    if (!whiteboardId) return;
+    socket.emit("chatHistory", getChatHistory(whiteboardId));
+  });
+
+  // Chat relay (broadcast to the whole room, sender included) + retain in
+  // memory for the session so a reload/reopen sees the history.
   socket.on("chatMessage", (msg) => {
     if (!msg?.whiteboardId) return;
+    const list = (chatHistory[msg.whiteboardId] ||= []);
+    list.push(msg);
+    if (list.length > CHAT_MAX) list.splice(0, list.length - CHAT_MAX);
     io.to(msg.whiteboardId).emit("chatMessage", msg);
   });
 
@@ -57,8 +76,25 @@ function registerPresenceHandlers(io, socket) {
         // Tell remaining peers to drop this user's cursor.
         io.to(whiteboardId).emit("cursorLeave", { socketId: socket.id });
       }
+      if (whiteboardUsers[whiteboardId].length === 0) {
+        delete whiteboardUsers[whiteboardId];
+      }
+    }
+
+    // Clear session chat once the board's room is truly empty. Room membership
+    // (not the presence list) is the authoritative "anyone left?" signal — a
+    // socket may join + chat without ever sending a presence event.
+    const boardId = socket.whiteboardId;
+    if (boardId) {
+      // The disconnecting socket is removed from the room by the time
+      // 'disconnect' fires, so a missing/zero room means nobody remains.
+      const room = io.sockets.adapter.rooms.get(boardId);
+      if (!room || room.size === 0) {
+        delete chatHistory[boardId];
+        delete whiteboardUsers[boardId];
+      }
     }
   });
 }
 
-module.exports = { registerPresenceHandlers, getActiveBoardIds };
+module.exports = { registerPresenceHandlers, getActiveBoardIds, getChatHistory };

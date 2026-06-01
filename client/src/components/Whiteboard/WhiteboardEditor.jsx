@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
-import { Excalidraw, MainMenu, exportToBlob } from "@excalidraw/excalidraw";
+import {
+  Excalidraw,
+  MainMenu,
+  exportToBlob,
+  CaptureUpdateAction,
+} from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import jsPDF from "jspdf";
 import {
@@ -102,7 +107,10 @@ export default function WhiteboardEditor() {
   const pickStroke = (value) => {
     setStrokeWidth(value);
     localStorage.setItem("wb-stroke", String(value));
-    apiRef.current?.updateScene({ appState: { currentItemStrokeWidth: value } });
+    apiRef.current?.updateScene({
+      appState: { currentItemStrokeWidth: value },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
   };
 
   const apiRef = useRef(null); // excalidrawAPI
@@ -169,6 +177,9 @@ export default function WhiteboardEditor() {
       apiRef.current.updateScene({
         elements: reconcileElements(local, scene.elements || []),
         appState: { viewBackgroundColor: scene.appState?.viewBackgroundColor },
+        // Remote changes must NOT enter this user's undo stack — otherwise undo
+        // reverts other people's strokes / jumps to an empty pre-sync snapshot.
+        captureUpdate: CaptureUpdateAction.NEVER,
       });
       if (scene.files && Object.keys(scene.files).length) {
         apiRef.current.addFiles(Object.values(scene.files));
@@ -222,12 +233,14 @@ export default function WhiteboardEditor() {
       });
       apiRef.current?.updateScene({
         collaborators: new Map(remoteCursors.current),
+        captureUpdate: CaptureUpdateAction.NEVER,
       });
     });
     s.on("cursorLeave", ({ socketId }) => {
       remoteCursors.current.delete(socketId);
       apiRef.current?.updateScene({
         collaborators: new Map(remoteCursors.current),
+        captureUpdate: CaptureUpdateAction.NEVER,
       });
     });
 

@@ -3,7 +3,7 @@
 
 const { socketAuth } = require("../middleware/auth");
 const { registerSceneHandlers, loadScene } = require("./scene");
-const { registerPresenceHandlers } = require("./presence");
+const { registerPresenceHandlers, getChatHistory } = require("./presence");
 
 function initSocket(io) {
   io.use(socketAuth);
@@ -22,6 +22,10 @@ function initSocket(io) {
         console.error("[socket] sceneInit failed:", err.message);
         socket.emit("sceneInit", null);
       }
+
+      // Send the in-memory chat history for this session so a reload/reopen
+      // sees prior messages.
+      socket.emit("chatHistory", getChatHistory(whiteboardId));
     });
 
     registerSceneHandlers(io, socket);
