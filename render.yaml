@@ -15,7 +15,9 @@ services:
         value: production
       - key: MONGO_URI
         sync: false
-      - key: JWT_SECRET
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: VITE_CLERK_PUBLISHABLE_KEY
         sync: false
       - key: CLIENT_ORIGIN
         sync: false
