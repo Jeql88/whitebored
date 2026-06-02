@@ -9,6 +9,7 @@
     "dev": "node --env-file=.env index.js"
   },
   "dependencies": {
+    "@better-auth/mongo-adapter": "^1.6.13",
     "@clerk/clerk-sdk-node": "^5.1.6",
     "bcrypt": "^5.1.1",
     "better-auth": "^1.6.13",

@@ -8,6 +8,7 @@ const { MongoClient } = require("mongodb");
 const { MONGO_URI, DB_NAME } = require("./config");
 
 const client = new MongoClient(MONGO_URI);
+const db = client.db(DB_NAME);
 
 const collections = {
   whiteboards: null,
@@ -53,4 +54,4 @@ function getCollections() {
   return collections;
 }
 
-module.exports = { connectDB, getCollections, client };
+module.exports = { connectDB, getCollections, client, db };
