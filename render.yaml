@@ -6,7 +6,7 @@ services:
     branch: main
     # --include=dev forces devDependencies (vite, tailwind plugin) to install
     # even though NODE_ENV=production, which otherwise skips them and 127s.
-    buildCommand: npm install --include=dev && npm run build
+    buildCommand: npm install --include=dev && cd client && npx vite build
     startCommand: npm start
     healthCheckPath: /healthz
     autoDeploy: true
