@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { Plus, Search, Loader2 } from "lucide-react";
+import { useSession } from "../../lib/auth-client";
 import {
   getWhiteboards,
   createWhiteboard,
@@ -11,17 +12,19 @@ import ThemeToggle from "../ThemeToggle";
 import UserMenu from "../UserMenu";
 import VerifyBanner from "../VerifyBanner";
 
-function getUserIdFromToken() {
-  const token = localStorage.getItem("token");
-  if (!token) return null;
-  try {
-    return JSON.parse(atob(token.split(".")[1])).userId;
-  } catch {
-    return null;
-  }
-}
+const PAGE_SIZE = 8;
 
-const DISPLAY_LIMIT = 5;
+const SORT_OPTIONS = [
+  { value: "updatedAt", label: "Last edited" },
+  { value: "createdAt", label: "Date created" },
+  { value: "name", label: "Name A–Z" },
+];
+
+const FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "solo", label: "Solo" },
+  { value: "shared", label: "Shared" },
+];
 
 export default function WhiteboardHome() {
   const [whiteboards, setWhiteboards] = useState([]);
@@ -30,24 +33,24 @@ export default function WhiteboardHome() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showPopup, setShowPopup] = useState(false);
   const [createError, setCreateError] = useState("");
-  const [showAllOwned, setShowAllOwned] = useState(false);
-  const [showAllShared, setShowAllShared] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeBoards, setActiveBoards] = useState([]);
+  const [sortBy, setSortBy] = useState("updatedAt");
+  const [filterBy, setFilterBy] = useState("all");
+  const [ownedVisible, setOwnedVisible] = useState(PAGE_SIZE);
+  const [sharedVisible, setSharedVisible] = useState(PAGE_SIZE);
+  const ownedSentinelRef = useRef(null);
+  const sharedSentinelRef = useRef(null);
   const location = useLocation();
+  const { data: session } = useSession();
+  const currentUserId = session?.user?.id;
 
-  const currentUserId = getUserIdFromToken();
-
-  // Poll which boards currently have someone editing, for the "live" badge.
   useEffect(() => {
     let alive = true;
     const load = () => getActiveBoards().then((ids) => alive && setActiveBoards(ids));
     load();
     const t = setInterval(load, 15000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   useEffect(() => {
@@ -69,10 +72,11 @@ export default function WhiteboardHome() {
           : whiteboards.filter(
               (wb) =>
                 wb.name.toLowerCase().includes(term) ||
-                // Search board CONTENT: typed text + any extracted (OCR) text.
                 (wb.textIndex || "").includes(term)
             )
       );
+      setOwnedVisible(PAGE_SIZE);
+      setSharedVisible(PAGE_SIZE);
     }, 400);
     return () => clearTimeout(delay);
   }, [searchTerm, whiteboards]);
@@ -88,22 +92,65 @@ export default function WhiteboardHome() {
     }
   }, [location.state]);
 
+  const sortBoards = useCallback(
+    (arr) => {
+      return [...arr].sort((a, b) => {
+        if (sortBy === "name") return a.name.localeCompare(b.name);
+        return new Date(b[sortBy]) - new Date(a[sortBy]);
+      });
+    },
+    [sortBy]
+  );
+
+  const ownedBoards = useMemo(() => {
+    const owned = filteredBoards.filter((wb) => wb.userId === currentUserId);
+    const filtered =
+      filterBy === "shared"
+        ? []
+        : filterBy === "solo"
+        ? owned.filter((wb) => !wb.editors?.length)
+        : owned;
+    return sortBoards(filtered);
+  }, [filteredBoards, currentUserId, filterBy, sortBoards]);
+
+  const sharedBoards = useMemo(() => {
+    const shared = filteredBoards.filter((wb) => wb.userId !== currentUserId);
+    const filtered =
+      filterBy === "solo"
+        ? []
+        : filterBy === "shared" || filterBy === "all"
+        ? shared
+        : shared;
+    return sortBoards(filtered);
+  }, [filteredBoards, currentUserId, filterBy, sortBoards]);
+
+  // Infinite scroll for owned boards
   useEffect(() => {
-    setShowAllOwned(false);
-    setShowAllShared(false);
-  }, [searchTerm]);
+    const sentinel = ownedSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setOwnedVisible((v) => v + PAGE_SIZE);
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [ownedBoards.length]);
 
-  const ownedBoards = useMemo(
-    () => filteredBoards.filter((wb) => wb.userId === currentUserId),
-    [filteredBoards, currentUserId]
-  );
-  const sharedBoards = useMemo(
-    () => filteredBoards.filter((wb) => wb.userId !== currentUserId),
-    [filteredBoards, currentUserId]
-  );
-
-  const ownedToShow = showAllOwned ? ownedBoards : ownedBoards.slice(0, DISPLAY_LIMIT);
-  const sharedToShow = showAllShared ? sharedBoards : sharedBoards.slice(0, DISPLAY_LIMIT);
+  // Infinite scroll for shared boards
+  useEffect(() => {
+    const sentinel = sharedSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setSharedVisible((v) => v + PAGE_SIZE);
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [sharedBoards.length]);
 
   const handleDelete = (id) => {
     setWhiteboards((prev) => prev.filter((wb) => wb._id !== id));
@@ -117,6 +164,11 @@ export default function WhiteboardHome() {
         .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     setWhiteboards(apply);
     setFilteredBoards(apply);
+  };
+
+  const handleDuplicate = (newBoard) => {
+    setWhiteboards((prev) => [newBoard, ...prev]);
+    setFilteredBoards((prev) => [newBoard, ...prev]);
   };
 
   const handleCreate = async () => {
@@ -136,18 +188,6 @@ export default function WhiteboardHome() {
       {text}
     </div>
   );
-
-  const showMoreBtn = (all, setAll, count) =>
-    count > DISPLAY_LIMIT && (
-      <div className="mt-4 text-center">
-        <button
-          onClick={() => setAll((v) => !v)}
-          className="rounded-lg border border-[var(--surface-border)] px-4 py-1.5 text-sm font-medium text-[var(--surface-text)] hover:bg-brand-50 dark:hover:bg-brand-600/15"
-        >
-          {all ? "Show Less" : `Show More (${count - DISPLAY_LIMIT} more)`}
-        </button>
-      </div>
-    );
 
   return (
     <div className="min-h-screen bg-[var(--surface-bg)]">
@@ -169,19 +209,49 @@ export default function WhiteboardHome() {
       <VerifyBanner />
 
       <main className="mx-auto max-w-5xl px-6 py-8">
-        {/* Search */}
-        <div className="relative mb-8 max-w-md">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--surface-muted)]"
-          />
-          <input
-            type="text"
-            placeholder="Search by name or content…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] py-2 pl-9 pr-3 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
-          />
+        {/* Search + sort/filter bar */}
+        <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative max-w-md flex-1">
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--surface-muted)]"
+            />
+            <input
+              type="text"
+              placeholder="Search by name or content…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] py-2 pl-9 pr-3 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Sort */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            {/* Filter pills */}
+            <div className="flex rounded-lg border border-[var(--surface-border)] overflow-hidden">
+              {FILTER_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  onClick={() => setFilterBy(o.value)}
+                  className={`px-3 py-2 text-sm font-medium transition-colors ${
+                    filterBy === o.value
+                      ? "bg-brand-600 text-white"
+                      : "bg-[var(--surface-card)] text-[var(--surface-muted)] hover:bg-[var(--surface-border)]"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {loading && (
@@ -191,54 +261,64 @@ export default function WhiteboardHome() {
         )}
 
         {!loading && (
-        <>
-        {/* Owned */}
-        <section className="mb-10">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-brand-600">
-            Owned by you
-          </h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            <button
-              onClick={() => setShowPopup(true)}
-              className="flex h-36 flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-[var(--surface-border)] text-[var(--surface-muted)] transition-colors hover:border-brand-500 hover:text-brand-600"
-            >
-              <Plus size={28} />
-              <span className="text-sm font-medium">Create New</span>
-            </button>
-            {ownedBoards.length === 0 && sectionEmpty("No whiteboards yet. Create one!")}
-            {ownedToShow.map((wb) => (
-              <WhiteboardCard
-                key={wb._id}
-                whiteboard={wb}
-                onDelete={handleDelete}
-                onRename={handleRename}
-                isActive={activeBoards.includes(wb._id)}
-              />
-            ))}
-          </div>
-          {showMoreBtn(showAllOwned, setShowAllOwned, ownedBoards.length)}
-        </section>
+          <>
+            {/* Owned */}
+            <section className="mb-10">
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-brand-600">
+                Owned by you
+              </h2>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                <button
+                  onClick={() => setShowPopup(true)}
+                  className="flex h-48 flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-[var(--surface-border)] text-[var(--surface-muted)] transition-colors hover:border-brand-500 hover:text-brand-600"
+                >
+                  <Plus size={28} />
+                  <span className="text-sm font-medium">Create New</span>
+                </button>
+                {ownedBoards.length === 0 && sectionEmpty("No whiteboards yet. Create one!")}
+                {ownedBoards.slice(0, ownedVisible).map((wb) => (
+                  <WhiteboardCard
+                    key={wb._id}
+                    whiteboard={wb}
+                    onDelete={handleDelete}
+                    onRename={handleRename}
+                    onDuplicate={handleDuplicate}
+                    isActive={activeBoards.includes(wb._id)}
+                  />
+                ))}
+              </div>
+              {ownedVisible < ownedBoards.length && (
+                <div ref={ownedSentinelRef} className="mt-4 flex justify-center py-2">
+                  <Loader2 className="animate-spin text-[var(--surface-muted)]" size={18} />
+                </div>
+              )}
+            </section>
 
-        {/* Shared */}
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-accent-600">
-            Shared with you
-          </h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {sharedBoards.length === 0 && sectionEmpty("No shared whiteboards yet.")}
-            {sharedToShow.map((wb) => (
-              <WhiteboardCard
-                key={wb._id}
-                whiteboard={wb}
-                onDelete={handleDelete}
-                onRename={handleRename}
-                isActive={activeBoards.includes(wb._id)}
-              />
-            ))}
-          </div>
-          {showMoreBtn(showAllShared, setShowAllShared, sharedBoards.length)}
-        </section>
-        </>
+            {/* Shared */}
+            <section>
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-accent-600">
+                Shared with you
+              </h2>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                {sharedBoards.length === 0 && sectionEmpty("No shared whiteboards yet.")}
+                {sharedBoards.slice(0, sharedVisible).map((wb) => (
+                  <WhiteboardCard
+                    key={wb._id}
+                    whiteboard={wb}
+                    onDelete={handleDelete}
+                    onRename={handleRename}
+                    onDuplicate={handleDuplicate}
+                    isActive={activeBoards.includes(wb._id)}
+                  />
+                ))}
+              </div>
+              {sharedVisible < sharedBoards.length && (
+                <div ref={sharedSentinelRef} className="mt-4 flex justify-center py-2">
+                  <Loader2 className="animate-spin text-[var(--surface-muted)]" size={18} />
+                </div>
+              )}
+            </section>
+          </>
         )}
       </main>
 

@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Settings, LogOut } from "lucide-react";
+import { useSession, authClient } from "../lib/auth-client";
 import { getInitials, getColorForName } from "../utils/userColor";
-
-function usernameFromToken() {
-  const token = localStorage.getItem("token");
-  if (!token) return null;
-  try {
-    return JSON.parse(atob(token.split(".")[1])).username || null;
-  } catch {
-    return null;
-  }
-}
 
 // Avatar button + dropdown (Account settings / Logout), shared by the dashboard
 // and the editor top bar.
@@ -19,7 +10,8 @@ export default function UserMenu() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  const name = usernameFromToken() || "Guest";
+  const { data: session } = useSession();
+  const name = session?.user?.name || session?.user?.email || "Guest";
 
   useEffect(() => {
     const onClick = (e) => {
@@ -29,8 +21,8 @@ export default function UserMenu() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const logout = () => {
-    localStorage.removeItem("token");
+  const logout = async () => {
+    await authClient.signOut();
     navigate("/login");
   };
 

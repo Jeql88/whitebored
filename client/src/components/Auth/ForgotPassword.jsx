@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { forgotPassword } from "../../api/auth";
+import { authClient } from "../../lib/auth-client";
 import AuthLayout from "./AuthLayout";
 
 const inputCls =
@@ -14,13 +14,13 @@ export default function ForgotPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      await forgotPassword(email);
-    } finally {
-      // Always show the same message — don't reveal whether the email exists.
-      setSent(true);
-      setLoading(false);
-    }
+    await authClient.forgetPassword({
+      email,
+      redirectTo: `${window.location.origin}/reset`,
+    }).catch(() => {});
+    // Always show success — don't reveal whether email exists.
+    setSent(true);
+    setLoading(false);
   };
 
   return (

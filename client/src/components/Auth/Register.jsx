@@ -1,15 +1,13 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { register } from "../../api/auth";
+import { authClient } from "../../lib/auth-client";
 import AuthLayout from "./AuthLayout";
 
 const inputCls =
   "w-full rounded-lg border border-[var(--surface-border)] bg-transparent px-3 py-2.5 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30";
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export default function Register() {
-  const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -19,26 +17,16 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-
-    if (!EMAIL_RE.test(email)) return setError("Please enter a valid email address");
     if (password.length < 8) return setError("Password must be at least 8 characters");
     if (password !== confirm) return setError("Passwords do not match");
 
     setLoading(true);
-    try {
-      const res = await register(username, email, password);
-      if (res.token) {
-        // Auto-login: store the token and go straight into the app. A verify
-        // email is sent in the background; the dashboard shows a reminder banner.
-        localStorage.setItem("token", res.token);
-        window.location.assign("/whiteboards");
-      } else {
-        setError(res.error || "Registration failed");
-      }
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
+    const { error: err } = await authClient.signUp.email({ email, password, name });
+    if (err) {
+      setError(err.message || "Registration failed");
       setLoading(false);
+    } else {
+      window.location.assign("/whiteboards");
     }
   };
 
@@ -57,8 +45,8 @@ export default function Register() {
     >
       <form onSubmit={handleSubmit} className="space-y-3">
         <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
           placeholder="Username"
           required
           className={inputCls}

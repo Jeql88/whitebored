@@ -15,10 +15,10 @@ services:
         value: production
       - key: MONGO_URI
         sync: false
-      - key: CLERK_SECRET_KEY
+      - key: BETTER_AUTH_SECRET
         sync: false
-      - key: VITE_CLERK_PUBLISHABLE_KEY
-        sync: false
+      - key: BETTER_AUTH_URL
+        value: https://whiteboard-app-8loo.onrender.com
       - key: CLIENT_ORIGIN
         sync: false
       - key: RESEND_API_KEY

@@ -1,13 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { getMe, updateEmail, changePassword } from "../../api/auth";
+import { authClient, useSession } from "../../lib/auth-client";
 import ThemeToggle from "../ThemeToggle";
 
 const inputCls =
   "w-full rounded-lg border border-[var(--surface-border)] bg-transparent px-3 py-2.5 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function Notice({ kind, children }) {
   if (!children) return null;
@@ -20,38 +18,27 @@ function Notice({ kind, children }) {
 
 export default function AccountSettings() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [emailMsg, setEmailMsg] = useState({});
+  const { data: session } = useSession();
+  const user = session?.user;
+
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwMsg, setPwMsg] = useState({});
-
-  useEffect(() => {
-    getMe().then((me) => {
-      if (me?.username) setUsername(me.username);
-      if (me?.email) setEmail(me.email);
-    });
-  }, []);
-
-  const saveEmail = async (e) => {
-    e.preventDefault();
-    setEmailMsg({});
-    if (!EMAIL_RE.test(email)) return setEmailMsg({ error: "Enter a valid email" });
-    const res = await updateEmail(email);
-    setEmailMsg(res.success ? { ok: "Email updated" } : { error: res.error || "Failed" });
-  };
 
   const savePassword = async (e) => {
     e.preventDefault();
     setPwMsg({});
     if (pw.next.length < 8) return setPwMsg({ error: "New password must be at least 8 characters" });
     if (pw.next !== pw.confirm) return setPwMsg({ error: "New passwords do not match" });
-    const res = await changePassword(pw.current, pw.next);
-    if (res.success) {
+    const { error } = await authClient.changePassword({
+      currentPassword: pw.current,
+      newPassword: pw.next,
+      revokeOtherSessions: false,
+    });
+    if (error) {
+      setPwMsg({ error: error.message || "Failed" });
+    } else {
       setPwMsg({ ok: "Password changed" });
       setPw({ current: "", next: "", confirm: "" });
-    } else {
-      setPwMsg({ error: res.error || "Failed" });
     }
   };
 
@@ -73,26 +60,10 @@ export default function AccountSettings() {
 
       <main className="mx-auto max-w-md space-y-6 px-6 py-8">
         <section className="rounded-card border border-[var(--surface-border)] bg-[var(--surface-card)] p-6">
-          <p className="mb-4 text-sm text-[var(--surface-muted)]">
-            Signed in as <strong className="text-[var(--surface-text)]">{username}</strong>
+          <p className="mb-1 text-sm text-[var(--surface-muted)]">
+            Signed in as <strong className="text-[var(--surface-text)]">{user?.name || user?.email}</strong>
           </p>
-          <form onSubmit={saveEmail} className="space-y-3">
-            <label className="block text-sm font-semibold text-[var(--surface-text)]">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className={inputCls}
-            />
-            <Notice kind="error">{emailMsg.error}</Notice>
-            <Notice kind="ok">{emailMsg.ok}</Notice>
-            <button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-              Save email
-            </button>
-          </form>
+          <p className="text-sm text-[var(--surface-muted)]">{user?.email}</p>
         </section>
 
         <section className="rounded-card border border-[var(--surface-border)] bg-[var(--surface-card)] p-6">

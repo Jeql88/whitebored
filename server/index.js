@@ -8,11 +8,12 @@ const http = require("http");
 const express = require("express");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const { toNodeHandler } = require("better-auth/node");
 
 const config = require("./config");
 const { connectDB } = require("./db");
 const { initSocket } = require("./socket");
-const authRoutes = require("./routes/auth");
+const { auth } = require("./auth");
 const whiteboardRoutes = require("./routes/whiteboards");
 const ocrRoutes = require("./routes/ocr");
 
@@ -22,31 +23,28 @@ const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
 
-// Same-origin in production; allow the Vite dev origin otherwise. When
-// CLIENT_ORIGIN is unset we fall back to `true` (reflect request origin),
-// which is fine for a same-origin monolith and a public demo.
 const corsOrigin = config.CLIENT_ORIGIN || true;
 
 const io = new Server(server, {
-  cors: { origin: corsOrigin, methods: ["GET", "POST", "PATCH", "DELETE"] },
-  // Boards may include pasted images embedded in the scene payload.
+  cors: { origin: corsOrigin, credentials: true, methods: ["GET", "POST", "PATCH", "DELETE"] },
   maxHttpBufferSize: 1e7, // 10 MB
 });
 
-app.use(cors({ origin: corsOrigin }));
+app.use(cors({ origin: corsOrigin, credentials: true }));
+
+// BetterAuth handler must come BEFORE express.json() — it reads the raw body itself.
+app.all("/api/auth/*", toNodeHandler(auth));
+
 app.use(express.json({ limit: "10mb" }));
 
 // Liveness probe for Render (registered before the SPA fallback).
 app.get("/healthz", (req, res) => res.sendStatus(200));
 
 // REST API.
-app.use("/api/auth", authRoutes);
 app.use("/api/whiteboards", whiteboardRoutes(io));
 app.use("/api/whiteboards", ocrRoutes());
 
 // Static client build + SPA fallback.
-// Socket.IO owns /socket.io on the http server, so it never reaches Express.
-// Express 5 note: `app.get("*")` throws — use a regex that excludes /api.
 const clientDist = path.join(__dirname, "..", "client", "dist");
 app.use(express.static(clientDist));
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {

@@ -8,8 +8,6 @@ const { getCollections } = require("../db");
 const { getActiveBoardIds, clearBoardState } = require("../socket/presence");
 const { canAccessBoard, toObjectId } = require("../auth/boards");
 
-// Unverified users may own at most this many boards (incentive to verify).
-const UNVERIFIED_BOARD_LIMIT = 5;
 
 module.exports = function whiteboardRoutes(io) {
   const router = express.Router();
@@ -41,22 +39,10 @@ module.exports = function whiteboardRoutes(io) {
     res.json({ active: getActiveBoardIds() });
   });
 
-  // Create a board. Unverified users are capped at UNVERIFIED_BOARD_LIMIT.
+  // Create a board.
   router.post("/", authMiddleware, async (req, res) => {
-    const { whiteboards, users } = getCollections();
+    const { whiteboards } = getCollections();
     const userId = req.user.userId;
-
-    const user = await users.findOne({ _id: new ObjectId(userId) });
-    if (!user?.emailVerified) {
-      const owned = await whiteboards.countDocuments({ userId });
-      if (owned >= UNVERIFIED_BOARD_LIMIT) {
-        return res.status(403).json({
-          error: `Verify your email to create more than ${UNVERIFIED_BOARD_LIMIT} whiteboards.`,
-          code: "VERIFY_REQUIRED",
-          limit: UNVERIFIED_BOARD_LIMIT,
-        });
-      }
-    }
 
     let name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
     if (!name) name = "Untitled";
@@ -144,6 +130,41 @@ module.exports = function whiteboardRoutes(io) {
     }
   });
 
+  // Duplicate a board (owner only) — copies metadata and scene snapshot.
+  router.post("/:id/duplicate", authMiddleware, async (req, res) => {
+    const { whiteboards, scenes } = getCollections();
+    const userId = req.user.userId;
+    const srcId = req.params.id;
+
+    try {
+      const src = await whiteboards.findOne({ _id: new ObjectId(srcId), userId });
+      if (!src) return res.status(404).json({ error: "Whiteboard not found or unauthorized" });
+
+      const now = new Date();
+      const copy = {
+        name: `${src.name} copy`,
+        userId,
+        createdAt: now,
+        updatedAt: now,
+        ...(src.thumbnail ? { thumbnail: src.thumbnail } : {}),
+      };
+      const result = await whiteboards.insertOne(copy);
+      const newId = result.insertedId.toString();
+
+      // Copy scene snapshot if one exists.
+      const srcScene = await scenes.findOne({ whiteboardId: srcId });
+      if (srcScene) {
+        const { _id: _ignored, whiteboardId: _wid, ...sceneData } = srcScene;
+        await scenes.insertOne({ ...sceneData, whiteboardId: newId });
+      }
+
+      res.json({ _id: result.insertedId, ...copy });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
   // --- Comments ---
 
   router.get("/:id/comments", authMiddleware, async (req, res) => {
@@ -159,7 +180,7 @@ module.exports = function whiteboardRoutes(io) {
 
   router.post("/:id/comments", authMiddleware, async (req, res) => {
     if (!(await ensureAccess(req, res))) return;
-    const { comments, users } = getCollections();
+    const { comments } = getCollections();
     const whiteboardId = req.params.id;
     const { text } = req.body;
     if (typeof text !== "string" || !text.trim()) {
@@ -169,14 +190,7 @@ module.exports = function whiteboardRoutes(io) {
       return res.status(400).json({ error: "Comment too long" });
     }
 
-    let userName = "Anonymous";
-    try {
-      const user = await users.findOne({ _id: new ObjectId(req.user.userId) });
-      userName = user?.username || user?.name || "Anonymous";
-    } catch {
-      // Guests / non-ObjectId ids — fall back to the token username.
-      userName = req.user.username || "Anonymous";
-    }
+    const userName = req.user.username || "Anonymous";
 
     const comment = {
       whiteboardId,

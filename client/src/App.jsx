@@ -5,17 +5,15 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
+import { useSession } from "./lib/auth-client";
 import Login from "./components/Auth/Login";
 import Register from "./components/Auth/Register";
 import ForgotPassword from "./components/Auth/ForgotPassword";
 import ResetPassword from "./components/Auth/ResetPassword";
-import VerifyEmail from "./components/Auth/VerifyEmail";
 import AccountSettings from "./components/Auth/AccountSettings";
 import WhiteboardHome from "./components/Whiteboard/WhiteboardHome";
 import { ThemeProvider } from "./theme/ThemeContext";
 
-// Excalidraw is a large dependency — lazy-load the editor so the dashboard and
-// auth pages stay lightweight.
 const WhiteboardEditor = lazy(() =>
   import("./components/Whiteboard/WhiteboardEditor")
 );
@@ -28,9 +26,13 @@ function EditorFallback() {
   );
 }
 
-export default function App() {
-  const token = localStorage.getItem("token");
+function Protected({ children }) {
+  const { data: session, isPending } = useSession();
+  if (isPending) return null;
+  return session ? children : <Navigate to="/login" />;
+}
 
+export default function App() {
   return (
     <ThemeProvider>
       <Router>
@@ -39,27 +41,25 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/forgot" element={<ForgotPassword />} />
           <Route path="/reset" element={<ResetPassword />} />
-          <Route path="/verify" element={<VerifyEmail />} />
           <Route
             path="/whiteboards"
-            element={token ? <WhiteboardHome /> : <Navigate to="/login" />}
+            element={<Protected><WhiteboardHome /></Protected>}
           />
           <Route
             path="/account"
-            element={token ? <AccountSettings /> : <Navigate to="/login" />}
+            element={<Protected><AccountSettings /></Protected>}
           />
           <Route
             path="/whiteboard/:id"
             element={
-              <Suspense fallback={<EditorFallback />}>
-                <WhiteboardEditor />
-              </Suspense>
+              <Protected>
+                <Suspense fallback={<EditorFallback />}>
+                  <WhiteboardEditor />
+                </Suspense>
+              </Protected>
             }
           />
-          <Route
-            path="*"
-            element={<Navigate to={token ? "/whiteboards" : "/login"} />}
-          />
+          <Route path="*" element={<Navigate to="/whiteboards" />} />
         </Routes>
       </Router>
     </ThemeProvider>

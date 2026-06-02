@@ -9,7 +9,9 @@
     "dev": "node --env-file=.env index.js"
   },
   "dependencies": {
+    "@clerk/clerk-sdk-node": "^5.1.6",
     "bcrypt": "^5.1.1",
+    "better-auth": "^1.6.13",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",

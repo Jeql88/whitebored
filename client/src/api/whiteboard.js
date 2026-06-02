@@ -30,6 +30,10 @@ export function saveThumbnail(id, thumbnail) {
   return apiFetch(`${WB}/${id}/thumbnail`, { method: "PUT", body: { thumbnail } });
 }
 
+export function duplicateWhiteboard(id) {
+  return apiFetch(`${WB}/${id}/duplicate`, { method: "POST" });
+}
+
 export async function extractText(id, image) {
   return apiFetch(`${WB}/${id}/ocr`, { method: "POST", body: { image } });
 }

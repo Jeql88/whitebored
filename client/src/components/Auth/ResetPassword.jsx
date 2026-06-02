@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
-import { resetPassword } from "../../api/auth";
+import { authClient } from "../../lib/auth-client";
 import AuthLayout from "./AuthLayout";
 
 const inputCls =
@@ -8,7 +8,6 @@ const inputCls =
 
 export default function ResetPassword() {
   const [params] = useSearchParams();
-  const id = params.get("id");
   const token = params.get("token");
   const navigate = useNavigate();
 
@@ -18,7 +17,7 @@ export default function ResetPassword() {
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const invalidLink = !id || !token;
+  const invalidLink = !token;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,18 +26,13 @@ export default function ResetPassword() {
     if (password !== confirm) return setError("Passwords do not match");
 
     setLoading(true);
-    try {
-      const res = await resetPassword(id, token, password);
-      if (res.success) {
-        setDone(true);
-        setTimeout(() => navigate("/login"), 1500);
-      } else {
-        setError(res.error || "Could not reset password");
-      }
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
+    const { error: err } = await authClient.resetPassword({ newPassword: password, token });
+    if (err) {
+      setError(err.message || "Could not reset password");
       setLoading(false);
+    } else {
+      setDone(true);
+      setTimeout(() => navigate("/login"), 1500);
     }
   };
 
@@ -54,8 +48,7 @@ export default function ResetPassword() {
     >
       {invalidLink ? (
         <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-500/10">
-          This reset link is missing information. Request a new one from the
-          login page.
+          This reset link is missing information. Request a new one from the login page.
         </div>
       ) : done ? (
         <div className="rounded-lg bg-brand-50 px-4 py-3 text-sm text-[var(--surface-text)] dark:bg-brand-600/15">

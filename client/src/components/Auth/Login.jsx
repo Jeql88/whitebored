@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { login } from "../../api/auth";
+import { authClient } from "../../lib/auth-client";
 import AuthLayout from "./AuthLayout";
 
 const inputCls =
   "w-full rounded-lg border border-[var(--surface-border)] bg-transparent px-3 py-2.5 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30";
 
 export default function Login() {
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,20 +16,12 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    try {
-      const res = await login(username, password);
-      if (res.token) {
-        localStorage.setItem("token", res.token);
-        // Full navigation so App re-reads the token from localStorage and the
-        // authed routes render reliably (matches Register's behavior).
-        window.location.assign("/whiteboards");
-      } else {
-        setError(res.error || "Login failed");
-        setLoading(false);
-      }
-    } catch {
-      setError("Something went wrong. Please try again.");
+    const { error: err } = await authClient.signIn.email({ email, password });
+    if (err) {
+      setError(err.message || "Login failed");
       setLoading(false);
+    } else {
+      window.location.assign("/whiteboards");
     }
   };
 
@@ -48,10 +40,10 @@ export default function Login() {
     >
       <form onSubmit={handleSubmit} className="space-y-3">
         <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="Username"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
           required
           className={inputCls}
         />
@@ -69,10 +61,7 @@ export default function Login() {
           </div>
         )}
         <div className="text-right">
-          <Link
-            to="/forgot"
-            className="text-xs font-medium text-brand-600 hover:underline"
-          >
+          <Link to="/forgot" className="text-xs font-medium text-brand-600 hover:underline">
             Forgot password?
           </Link>
         </div>

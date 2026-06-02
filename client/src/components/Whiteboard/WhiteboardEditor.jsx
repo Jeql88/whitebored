@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useSession } from "../../lib/auth-client";
 import { io } from "socket.io-client";
 import {
   Excalidraw,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Maximize,
   ScanText,
+  X,
 } from "lucide-react";
 
 import { API_BASE } from "../../api/config";
@@ -34,18 +36,6 @@ import CommentsSidebar from "./CommentsSidebar";
 import ChatBox from "../Chatbox";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
-
-// Decode the JWT payload (userId/username) without verifying — display only.
-function getUserFromToken() {
-  const token = localStorage.getItem("token");
-  if (!token) return null;
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return { userId: payload.userId, username: payload.username, token };
-  } catch {
-    return null;
-  }
-}
 
 const SCENE_DEBOUNCE_MS = 250;
 const CURSOR_THROTTLE_MS = 50;
@@ -84,6 +74,8 @@ export default function WhiteboardEditor() {
   const [socket, setSocket] = useState(null);
   const [disconnected, setDisconnected] = useState(false);
   const [toast, setToast] = useState("");
+  const [ocrResult, setOcrResult] = useState(null);
+  const [ocrCopied, setOcrCopied] = useState(false);
   const [gridMode, setGridMode] = useState(
     () => localStorage.getItem("wb-grid") === "1"
   );
@@ -124,14 +116,16 @@ export default function WhiteboardEditor() {
   // fileId -> { original, inverted } dataURLs, for dark-mode image correction.
   const imageVariants = useRef(new Map());
 
-  // Identity: logged-in user, or a stable guest id persisted for this tab so a
-  // guest keeps ONE identity across reloads/reconnects (avoids duplicate
-  // avatars and lets their cursor stay consistent).
+  const { data: session } = useSession();
+
+  // Identity: logged-in user, or a stable guest id for shared-link access.
   const identity = useRef(null);
   if (!identity.current) {
-    const fromToken = getUserFromToken();
-    if (fromToken) {
-      identity.current = fromToken;
+    if (session?.user) {
+      identity.current = {
+        userId: session.user.id,
+        username: session.user.name || session.user.email || session.user.id,
+      };
     } else {
       let gid = sessionStorage.getItem("wb-guest-id");
       if (!gid) {
@@ -140,17 +134,24 @@ export default function WhiteboardEditor() {
           .slice(0, 8)}`;
         sessionStorage.setItem("wb-guest-id", gid);
       }
-      identity.current = { userId: gid, username: "Guest", token: null };
+      identity.current = { userId: gid, username: "Guest" };
     }
   }
   const me = identity.current;
-  const isGuest = !me.token;
+  const isGuest = !session?.user;
 
   // --- Socket lifecycle ---
+  // BetterAuth uses cookies — Socket.IO sends them automatically via withCredentials.
   useEffect(() => {
-    const s = me.token
-      ? io(API_BASE, { auth: { token: me.token } })
-      : io(API_BASE);
+    const s = io(API_BASE, { withCredentials: true });
+    setSocket(s);
+    wireSocket(s);
+    return () => s?.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whiteboardId]);
+
+  // Extracted socket event wiring so it can be called after token is ready.
+  const wireSocket = (s) => {
     setSocket(s);
 
     // Fires on first connect AND every reconnect — so we re-join the room,
@@ -253,13 +254,15 @@ export default function WhiteboardEditor() {
 
     // Presence avatar list.
     s.on("whiteboardUsers", (users) => setCollaborators(users || []));
+  };  // end wireSocket
 
-    const variants = imageVariants.current; // capture for cleanup
+  // Cleanup timers and image cache on unmount / board change.
+  useEffect(() => {
+    const variants = imageVariants.current;
     return () => {
-      s.disconnect();
       clearTimeout(sceneTimer.current);
       clearTimeout(applyTimer.current);
-      variants.clear(); // release cached image dataURLs
+      variants.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whiteboardId]);
@@ -529,11 +532,8 @@ export default function WhiteboardEditor() {
       });
       const result = await extractText(whiteboardId, dataUrl);
       if (result.error) return showToast(result.error);
-      showToast(
-        result.words
-          ? `Extracted ${result.words} words — board is now searchable by its text.`
-          : "No text detected."
-      );
+      if (!result.words) return showToast("No text detected.");
+      setOcrResult(result.text);
     } catch {
       showToast("Couldn't extract text. Try again.");
     }
@@ -716,6 +716,44 @@ export default function WhiteboardEditor() {
           />
         )}
       </div>
+
+      {/* OCR result modal */}
+      {ocrResult !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => { setOcrResult(null); setOcrCopied(false); }}
+        >
+          <div
+            className="relative flex w-full max-w-lg flex-col rounded-xl bg-[var(--surface-card)] border border-[var(--surface-border)] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--surface-border)] px-5 py-3">
+              <span className="font-semibold text-[var(--surface-text)]">Extracted Text</span>
+              <button
+                onClick={() => { setOcrResult(null); setOcrCopied(false); }}
+                className="rounded-lg p-1 text-[var(--surface-muted)] hover:bg-[var(--surface-border)] transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words px-5 py-4 text-sm text-[var(--surface-text)] font-sans leading-relaxed">
+              {ocrResult}
+            </pre>
+            <div className="flex justify-end border-t border-[var(--surface-border)] px-5 py-3">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(ocrResult);
+                  setOcrCopied(true);
+                  setTimeout(() => setOcrCopied(false), 2000);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
+              >
+                {ocrCopied ? "Copied!" : "Copy all"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

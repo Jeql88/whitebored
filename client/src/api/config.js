@@ -4,35 +4,29 @@
 export const API_BASE =
   import.meta.env.VITE_API_BASE ?? window.location.origin;
 
-// Clerk token getter — set by ClerkProvider in main.jsx via setClerkTokenGetter().
-let _getToken = () => Promise.resolve(null);
-export function setClerkTokenGetter(fn) {
-  _getToken = fn;
-}
-
 let redirecting = false;
 function handleUnauthorized() {
   if (redirecting) return;
   redirecting = true;
-  if (!location.pathname.startsWith("/sign-in")) {
-    window.location.assign("/sign-in");
+  if (!location.pathname.startsWith("/login")) {
+    window.location.assign("/login");
   }
 }
 
+// Central fetch wrapper: 60s timeout, 401 handling, tolerant JSON parsing.
+// BetterAuth uses cookie-based sessions — credentials: "include" ensures
+// cookies are sent on cross-origin requests (dev Vite proxy is same-origin).
 export async function apiFetch(path, { method = "GET", body, auth = true, headers = {} } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
   const h = { ...headers };
   if (body !== undefined) h["Content-Type"] = "application/json";
-  if (auth) {
-    const token = await _getToken();
-    if (token) h.Authorization = `Bearer ${token}`;
-  }
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method,
       headers: h,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: "include",
       signal: controller.signal,
     });
     if (res.status === 401 && auth) {

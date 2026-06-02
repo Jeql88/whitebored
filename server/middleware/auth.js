@@ -1,33 +1,41 @@
-const jwt = require("jsonwebtoken");
-const { JWT_SECRET } = require("../config");
+const { fromNodeHeaders } = require("better-auth/node");
+const { auth } = require("../auth");
 
-// Express middleware: require a valid Bearer token, attach req.user.
-function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "No token" });
+// Express middleware: verify BetterAuth session, attach req.user.
+async function authMiddleware(req, res, next) {
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+    if (!session?.user) return res.status(401).json({ error: "Not authenticated" });
+    req.user = {
+      userId: session.user.id,
+      username: session.user.username || session.user.name || session.user.email,
+    };
     next();
   } catch {
-    res.status(401).json({ error: "Invalid token" });
+    res.status(401).json({ error: "Invalid session" });
   }
 }
 
-// Socket.IO handshake auth: verified user, or a guest fallback so shared links
-// work without an account.
-function socketAuth(socket, next) {
-  const token = socket.handshake.auth?.token;
-  if (!token) {
-    socket.user = { userId: socket.id, isGuest: true, username: "Guest" };
-    return next();
-  }
+// Socket.IO handshake auth: verified user, or guest fallback for shared links.
+async function socketAuth(socket, next) {
+  // Try cookie-based session from the handshake headers.
   try {
-    socket.user = jwt.verify(token, JWT_SECRET);
-    socket.user.isGuest = false;
-    next();
+    const headers = fromNodeHeaders(socket.handshake.headers);
+    const session = await auth.api.getSession({ headers });
+    if (session?.user) {
+      socket.user = {
+        userId: session.user.id,
+        username: session.user.username || session.user.name || session.user.email,
+        isGuest: false,
+      };
+      return next();
+    }
   } catch {
-    next(new Error("Invalid token"));
+    // fall through to guest
   }
+  // No valid session — allow as guest (shared-link access).
+  socket.user = { userId: socket.id, isGuest: true, username: "Guest" };
+  next();
 }
 
 module.exports = { authMiddleware, socketAuth };
