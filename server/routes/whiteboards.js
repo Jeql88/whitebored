@@ -27,7 +27,7 @@ module.exports = function whiteboardRoutes(io) {
     const { whiteboards } = getCollections();
     const userId = req.user.userId;
     const boards = await whiteboards
-      .find({ $or: [{ userId }, { editors: userId }] })
+      .find({ $or: [{ userId }, { editors: userId }, { "collaborators.userId": userId }] })
       .sort({ updatedAt: -1 })
       .toArray();
     res.json(boards);
@@ -286,6 +286,143 @@ module.exports = function whiteboardRoutes(io) {
       }
     }
   );
+
+  // --- Collaborators ---
+
+  // GET /:id/collaborators — owner only, returns enriched list with names/emails.
+  router.get("/:id/collaborators", authMiddleware, async (req, res) => {
+    if (!toObjectId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+    const { whiteboards, users } = getCollections();
+    const whiteboardId = req.params.id;
+    const userId = req.user.userId;
+    try {
+      const board = await whiteboards.findOne(
+        { _id: new ObjectId(whiteboardId) },
+        { projection: { userId: 1, collaborators: 1 } }
+      );
+      if (!board) return res.status(404).json({ error: "Not found" });
+      if (String(board.userId) !== String(userId)) return res.status(403).json({ error: "Not authorized" });
+      const collabs = Array.isArray(board.collaborators) ? board.collaborators : [];
+      if (!collabs.length) return res.json([]);
+      const userIds = collabs.map((c) => c.userId);
+      const userDocs = await users
+        .find({ id: { $in: userIds } }, { projection: { id: 1, name: 1, email: 1 } })
+        .toArray();
+      const byId = Object.fromEntries(userDocs.map((u) => [u.id, u]));
+      const result = collabs.map((c) => ({
+        userId: c.userId,
+        role: c.role,
+        addedAt: c.addedAt,
+        name: byId[c.userId]?.name || byId[c.userId]?.email || c.userId,
+        email: byId[c.userId]?.email || "",
+      }));
+      res.json(result);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // POST /:id/collaborators — owner adds a person by email.
+  router.post("/:id/collaborators", authMiddleware, async (req, res) => {
+    if (!toObjectId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+    const { whiteboards, users } = getCollections();
+    const whiteboardId = req.params.id;
+    const ownerId = req.user.userId;
+    const { email, role } = req.body || {};
+    if (!["editor", "viewer"].includes(role)) return res.status(400).json({ error: "Invalid role" });
+    if (typeof email !== "string" || !email.trim()) return res.status(400).json({ error: "Email required" });
+    try {
+      const board = await whiteboards.findOne(
+        { _id: new ObjectId(whiteboardId) },
+        { projection: { userId: 1, collaborators: 1 } }
+      );
+      if (!board) return res.status(404).json({ error: "Not found" });
+      if (String(board.userId) !== String(ownerId)) return res.status(403).json({ error: "Not authorized" });
+      const target = await users.findOne({ email: email.trim().toLowerCase() });
+      if (!target) return res.status(404).json({ error: "No account with that email" });
+      const targetId = target.id || String(target._id);
+      if (String(targetId) === String(ownerId)) return res.status(400).json({ error: "Cannot add yourself" });
+      const existing = Array.isArray(board.collaborators)
+        ? board.collaborators.find((c) => String(c.userId) === String(targetId))
+        : null;
+      if (existing) return res.status(409).json({ error: "Already added" });
+      const entry = { userId: targetId, role, addedAt: new Date() };
+      const update = { $push: { collaborators: entry } };
+      if (role === "editor") update.$addToSet = { editors: targetId };
+      await whiteboards.updateOne({ _id: new ObjectId(whiteboardId) }, update);
+      res.json({ userId: targetId, role, addedAt: entry.addedAt, name: target.name || target.email || targetId, email: target.email || "" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // PATCH /:id/collaborators/:userId — owner changes a collaborator's role.
+  router.patch("/:id/collaborators/:userId", authMiddleware, async (req, res) => {
+    if (!toObjectId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+    const { whiteboards } = getCollections();
+    const whiteboardId = req.params.id;
+    const ownerId = req.user.userId;
+    const targetId = req.params.userId;
+    const { role } = req.body || {};
+    if (!["editor", "viewer"].includes(role)) return res.status(400).json({ error: "Invalid role" });
+    try {
+      const board = await whiteboards.findOne(
+        { _id: new ObjectId(whiteboardId) },
+        { projection: { userId: 1 } }
+      );
+      if (!board) return res.status(404).json({ error: "Not found" });
+      if (String(board.userId) !== String(ownerId)) return res.status(403).json({ error: "Not authorized" });
+      const update = {
+        $set: { "collaborators.$[elem].role": role },
+      };
+      if (role === "editor") {
+        update.$addToSet = { editors: targetId };
+      } else {
+        update.$pull = { editors: targetId };
+      }
+      const result = await whiteboards.updateOne(
+        { _id: new ObjectId(whiteboardId) },
+        update,
+        { arrayFilters: [{ "elem.userId": targetId }] }
+      );
+      if (result.matchedCount === 0) return res.status(404).json({ error: "Not found" });
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // DELETE /:id/collaborators/:userId — owner removes someone, or user removes themselves.
+  router.delete("/:id/collaborators/:userId", authMiddleware, async (req, res) => {
+    if (!toObjectId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+    const { whiteboards } = getCollections();
+    const whiteboardId = req.params.id;
+    const requesterId = req.user.userId;
+    const targetId = req.params.userId;
+    try {
+      const board = await whiteboards.findOne(
+        { _id: new ObjectId(whiteboardId) },
+        { projection: { userId: 1 } }
+      );
+      if (!board) return res.status(404).json({ error: "Not found" });
+      const isOwner = String(board.userId) === String(requesterId);
+      const isSelf = String(requesterId) === String(targetId);
+      if (!isOwner && !isSelf) return res.status(403).json({ error: "Not authorized" });
+      await whiteboards.updateOne(
+        { _id: new ObjectId(whiteboardId) },
+        {
+          $pull: { collaborators: { userId: targetId }, editors: targetId },
+        }
+      );
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
 
   return router;
 };

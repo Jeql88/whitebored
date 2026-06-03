@@ -40,9 +40,20 @@ async function canAccessBoard(user, whiteboardId) {
   const uid = user?.userId;
   if (!uid) return { allowed: false, shareMode };
   if (String(board.userId) === String(uid)) return { allowed: true, shareMode: "edit" }; // owner always edits
+
+  // Explicit collaborator with a role (editor or viewer)
+  const collab = Array.isArray(board.collaborators)
+    ? board.collaborators.find((c) => String(c.userId) === String(uid))
+    : null;
+  if (collab) return { allowed: true, shareMode: collab.role === "viewer" ? "view" : "edit" };
+
+  // Legacy editors array (backward compat)
   if (Array.isArray(board.editors) && board.editors.map(String).includes(String(uid))) {
-    return { allowed: true, shareMode: "edit" }; // named editors always edit
+    return { allowed: true, shareMode: "edit" };
   }
+
+  // Authenticated non-member visiting via link — same logic as guests
+  if (shareAccess !== "auth") return { allowed: true, shareMode };
   return { allowed: false, shareMode };
 }
 

@@ -78,7 +78,7 @@ function registerSceneHandlers(io, socket) {
     if (!socket.rooms.has(whiteboardId)) return;
     if (!Array.isArray(elements)) return;
     // View-only guests cannot write scene updates.
-    if (socket.user?.isGuest && socket.shareMode === "view") return;
+    if (socket.shareMode === "view") return;
     if (!socket.user?.userId) return;
     const cleanAppState = sanitizeAppState(appState);
     const userId = socket.user.userId;

@@ -26,14 +26,11 @@ import {
   ScanText,
   X,
   PenLine,
-  Lock,
-  LockOpen,
-  Users,
   LogIn,
 } from "lucide-react";
 
 import { API_BASE } from "../../api/config";
-import { updateWhiteboard, saveThumbnail, extractText, updateShareSettings } from "../../api/whiteboard";
+import { updateWhiteboard, saveThumbnail, extractText, updateShareSettings, getCollaborators } from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
 import { counterInvertDataUrl } from "../../utils/imageFilter";
@@ -41,6 +38,7 @@ import CommentsSidebar from "./CommentsSidebar";
 import ChatBox from "../Chatbox";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
+import SharePanel from "./SharePanel";
 
 const SCENE_DEBOUNCE_MS = 250;
 const CURSOR_THROTTLE_MS = 50;
@@ -84,6 +82,8 @@ export default function WhiteboardEditor() {
   const [shareMode, setShareMode] = useState("edit");   // "edit" | "view"
   const [shareAccess, setShareAccess] = useState("anyone"); // "anyone" | "auth"
   const [showSharePanel, setShowSharePanel] = useState(false);
+  const [ownerId, setOwnerId] = useState(null);
+  const [boardCollaborators, setBoardCollaborators] = useState([]);
   const [gridMode, setGridMode] = useState(
     () => localStorage.getItem("wb-grid") === "1"
   );
@@ -378,19 +378,24 @@ export default function WhiteboardEditor() {
     [socket, whiteboardId, me]
   );
 
-  // --- Board name (fetch + rename) ---
+  // --- Board name + share settings (fetch on mount) ---
   useEffect(() => {
     import("../../api/whiteboard").then(({ getWhiteboards, getBoardInfo }) => {
-      if (isGuest) {
-        getBoardInfo(whiteboardId).then((info) => {
-          if (info?.name) setBoardName(info.name);
-        });
-      } else {
+      // getBoardInfo is public (no auth required) and returns name, shareMode,
+      // shareAccess, and ownerId — use it for everyone to populate share state.
+      getBoardInfo(whiteboardId).then((info) => {
+        if (info?.name) setBoardName(info.name);
+        if (info?.shareMode) setShareMode(info.shareMode);
+        if (info?.shareAccess) setShareAccess(info.shareAccess);
+        if (info?.ownerId) setOwnerId(info.ownerId);
+      });
+      // Owners get an authoritative name from their board list (handles renaming).
+      if (!isGuest) {
         getWhiteboards().then((boards) => {
           const found = Array.isArray(boards)
             ? boards.find((b) => b._id === whiteboardId)
             : null;
-          if (found) setBoardName(found.name);
+          if (found?.name) setBoardName(found.name);
         });
       }
     });
@@ -577,20 +582,19 @@ export default function WhiteboardEditor() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showSharePanel]);
 
-  // View-only mode: guests on a view-only board cannot draw.
-  const isViewOnly = isGuest && shareMode === "view";
+  // isOwner: current user is the board owner (ownerId set from getBoardInfo).
+  const isOwner = !isGuest && !!ownerId && me.userId === ownerId;
 
-  // Owner toggles share mode (lock/unlock) — broadcasts to all peers via socket.
-  const toggleShareMode = async () => {
-    const next = shareMode === "edit" ? "view" : "edit";
-    try {
-      await updateShareSettings(whiteboardId, { shareMode: next });
-      setShareMode(next);
-      socket?.emit("shareModeChanged", { whiteboardId, shareMode: next });
-    } catch {
-      showToast("Couldn't update share settings.");
-    }
-  };
+  // View-only: anyone who isn't the owner and the board is set to view-only.
+  const isViewOnly = shareMode === "view" && !isOwner;
+
+  // Load explicit collaborators when the owner opens the share panel.
+  useEffect(() => {
+    if (!showSharePanel || !isOwner) return;
+    getCollaborators(whiteboardId)
+      .then((data) => setBoardCollaborators(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [showSharePanel, isOwner, whiteboardId]);
 
   const saveShareAccess = async (next) => {
     try {
@@ -667,7 +671,7 @@ export default function WhiteboardEditor() {
           <MessagesSquare size={18} />
         </button>
 
-        {/* Share / copy link — opens share popup for owners, just copies for guests */}
+        {/* Share / copy link — opens share popup for signed-in users, just copies for guests */}
         <div className="relative">
           <button
             onClick={() => !isGuest ? setShowSharePanel((v) => !v) : copyLink()}
@@ -678,54 +682,26 @@ export default function WhiteboardEditor() {
           </button>
 
           {showSharePanel && !isGuest && (
-            <div
+            <SharePanel
               ref={sharePanelRef}
-              className="absolute right-0 top-11 z-40 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-card)] p-4 shadow-xl"
-              style={{ width: 272 }}
-            >
-              <p className="mb-3 text-sm font-semibold text-[var(--surface-text)]">Share board</p>
-
-              {/* shareMode toggle */}
-              <div className="mb-3">
-                <p className="mb-1.5 text-xs font-medium text-[var(--surface-muted)]">Guests can</p>
-                <div className="flex overflow-hidden rounded-lg border border-[var(--surface-border)]">
-                  {[["edit", "Edit"], ["view", "View only"]].map(([m, label]) => (
-                    <button
-                      key={m}
-                      onClick={() => { updateShareSettings(whiteboardId, { shareMode: m }).then(() => { setShareMode(m); socket?.emit("shareModeChanged", { whiteboardId, shareMode: m }); }).catch(() => showToast("Couldn't update share settings.")); }}
-                      className={`flex-1 py-2 text-xs font-medium transition-colors ${shareMode === m ? "bg-brand-600 text-white" : "text-[var(--surface-muted)] hover:bg-[var(--surface-border)]"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* shareAccess toggle */}
-              <div className="mb-4">
-                <p className="mb-1.5 text-xs font-medium text-[var(--surface-muted)]">Who can access</p>
-                <div className="flex overflow-hidden rounded-lg border border-[var(--surface-border)]">
-                  {[["anyone", "Anyone with link"], ["auth", "Signed-in only"]].map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => saveShareAccess(v)}
-                      className={`flex-1 py-2 text-xs font-medium transition-colors ${shareAccess === v ? "bg-brand-600 text-white" : "text-[var(--surface-muted)] hover:bg-[var(--surface-border)]"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Copy link */}
-              <button
-                onClick={() => { copyLink(); }}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
-              >
-                <Link2 size={14} />
-                {copied ? "Link copied!" : "Copy share link"}
-              </button>
-            </div>
+              whiteboardId={whiteboardId}
+              shareMode={shareMode}
+              shareAccess={shareAccess}
+              boardCollaborators={boardCollaborators}
+              setBoardCollaborators={setBoardCollaborators}
+              isOwner={isOwner}
+              ownerName={isOwner ? me.username : ""}
+              currentUserId={me.userId}
+              onShareModeChange={(m) => {
+                updateShareSettings(whiteboardId, { shareMode: m })
+                  .then(() => { setShareMode(m); socket?.emit("shareModeChanged", { whiteboardId, shareMode: m }); })
+                  .catch(() => showToast("Couldn't update share settings."));
+              }}
+              onShareAccessChange={saveShareAccess}
+              onClose={() => setShowSharePanel(false)}
+              onCopyLink={copyLink}
+              copied={copied}
+            />
           )}
         </div>
         <button

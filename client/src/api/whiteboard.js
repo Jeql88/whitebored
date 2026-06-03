@@ -57,3 +57,19 @@ export function addComment(whiteboardId, text) {
 export function deleteComment(whiteboardId, commentId) {
   return apiFetch(`${WB}/${whiteboardId}/comments/${commentId}`, { method: "DELETE" });
 }
+
+export function getCollaborators(id) {
+  return apiFetch(`${WB}/${id}/collaborators`);
+}
+
+export function addCollaborator(id, email, role) {
+  return apiFetch(`${WB}/${id}/collaborators`, { method: "POST", body: { email, role } });
+}
+
+export function removeCollaborator(id, userId) {
+  return apiFetch(`${WB}/${id}/collaborators/${userId}`, { method: "DELETE" });
+}
+
+export function updateCollaboratorRole(id, userId, role) {
+  return apiFetch(`${WB}/${id}/collaborators/${userId}`, { method: "PATCH", body: { role } });
+}
