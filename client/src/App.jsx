@@ -13,6 +13,11 @@ import ResetPassword from "./components/Auth/ResetPassword";
 import VerifyEmail from "./components/Auth/VerifyEmail";
 import AccountSettings from "./components/Auth/AccountSettings";
 import WhiteboardHome from "./components/Whiteboard/WhiteboardHome";
+import AdminLayout, { AdminRoute } from "./components/Admin/AdminLayout";
+import AdminStats from "./components/Admin/AdminStats";
+import AdminUsers from "./components/Admin/AdminUsers";
+import AdminBoards from "./components/Admin/AdminBoards";
+import AdminLive from "./components/Admin/AdminLive";
 import { ThemeProvider } from "./theme/ThemeContext";
 
 const WhiteboardEditor = lazy(() =>
@@ -30,7 +35,11 @@ function EditorFallback() {
 function Protected({ children }) {
   const { data: session, isPending } = useSession();
   if (isPending) return null;
-  return session ? children : <Navigate to="/login" />;
+  if (!session) {
+    const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
+    return <Navigate to={`/login?returnTo=${returnTo}`} />;
+  }
+  return children;
 }
 
 export default function App() {
@@ -61,6 +70,17 @@ export default function App() {
               </Protected>
             }
           />
+          {/* Admin panel */}
+          <Route
+            path="/admin"
+            element={<AdminRoute><AdminLayout /></AdminRoute>}
+          >
+            <Route index element={<Navigate to="/admin/stats" />} />
+            <Route path="stats" element={<AdminStats />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="boards" element={<AdminBoards />} />
+            <Route path="live" element={<AdminLive />} />
+          </Route>
           <Route path="*" element={<Navigate to="/whiteboards" />} />
         </Routes>
       </Router>

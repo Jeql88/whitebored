@@ -16,6 +16,7 @@ const { initSocket } = require("./socket");
 const { auth } = require("./auth");
 const whiteboardRoutes = require("./routes/whiteboards");
 const ocrRoutes = require("./routes/ocr");
+const adminRoutes = require("./routes/admin");
 
 const app = express();
 // Render terminates TLS at a proxy; trust it so req.ip reflects the real client
@@ -41,6 +42,7 @@ app.use(express.json({ limit: "10mb" }));
 app.get("/healthz", (req, res) => res.sendStatus(200));
 
 // REST API.
+app.use("/api/admin", adminRoutes());
 app.use("/api/whiteboards", whiteboardRoutes(io));
 app.use("/api/whiteboards", ocrRoutes());
 

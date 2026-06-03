@@ -127,4 +127,5 @@ module.exports = {
   getActiveBoardIds,
   getChatHistory,
   clearBoardState,
+  whiteboardUsers,
 };

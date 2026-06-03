@@ -1,11 +1,11 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { authClient } from "../../lib/auth-client";
 import AuthLayout from "./AuthLayout";
 
-function GoogleButton({ label }) {
+function GoogleButton({ label, returnTo = "/whiteboards" }) {
   const handleGoogle = async () => {
-    await authClient.signIn.social({ provider: "google", callbackURL: "/whiteboards" });
+    await authClient.signIn.social({ provider: "google", callbackURL: returnTo });
   };
   return (
     <button
@@ -23,6 +23,8 @@ const inputCls =
   "w-full rounded-lg border border-[var(--surface-border)] bg-transparent px-3 py-2.5 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30";
 
 export default function Login() {
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get("returnTo") || "/whiteboards";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -37,7 +39,7 @@ export default function Login() {
       setError(err.message || "Login failed");
       setLoading(false);
     } else {
-      window.location.assign("/whiteboards");
+      window.location.assign(returnTo);
     }
   };
 
@@ -55,7 +57,7 @@ export default function Login() {
       }
     >
       <div className="space-y-3">
-        <GoogleButton label="Continue with Google" />
+        <GoogleButton label="Continue with Google" returnTo={returnTo} />
         <div className="flex items-center gap-3 text-xs text-[var(--surface-muted)]">
           <div className="flex-1 border-t border-[var(--surface-border)]" />
           or

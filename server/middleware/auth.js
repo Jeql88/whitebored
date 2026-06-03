@@ -45,4 +45,19 @@ async function socketAuth(socket, next) {
   next();
 }
 
-module.exports = { authMiddleware, socketAuth };
+// Admin middleware: must follow authMiddleware. Checks userId against the
+// comma-separated ADMIN_USER_IDS env var.
+const ADMIN_IDS = (process.env.ADMIN_USER_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function adminMiddleware(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "Not authenticated" });
+  if (!ADMIN_IDS.includes(req.user.userId)) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
+module.exports = { authMiddleware, socketAuth, adminMiddleware };

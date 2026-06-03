@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Settings, LogOut } from "lucide-react";
+import { Settings, LogOut, ShieldCheck } from "lucide-react";
 import { useSession, authClient } from "../lib/auth-client";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { getInitials, getColorForName } from "../utils/userColor";
 
 // Avatar button + dropdown (Account settings / Logout), shared by the dashboard
@@ -11,6 +12,7 @@ export default function UserMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const { data: session } = useSession();
+  const { isAdmin } = useIsAdmin();
   const name = session?.user?.name || session?.user?.email || "Guest";
 
   useEffect(() => {
@@ -47,6 +49,14 @@ export default function UserMenu() {
           >
             <Settings size={15} /> Account settings
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => navigate("/admin")}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-600/15"
+            >
+              <ShieldCheck size={15} /> Admin panel
+            </button>
+          )}
           <button
             onClick={logout}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
