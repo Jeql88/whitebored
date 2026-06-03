@@ -112,6 +112,9 @@ export default function WhiteboardEditor() {
     });
 
   const apiRef = useRef(null); // excalidrawAPI
+  // Always-current socket so emit callbacks never close over a null/stale socket
+  // (the `socket` state is null on the first renders — refs avoid dropped emits).
+  const socketRef = useRef(null);
   const isApplyingRemote = useRef(false);
   const sceneTimer = useRef(null);
   const applyTimer = useRef(null);
@@ -149,9 +152,16 @@ export default function WhiteboardEditor() {
   // BetterAuth uses cookies — Socket.IO sends them automatically via withCredentials.
   useEffect(() => {
     const s = io(API_BASE, { withCredentials: true });
+    socketRef.current = s;
     setSocket(s);
     wireSocket(s);
-    return () => s?.disconnect();
+    return () => {
+      // Explicit leave so peers drop our avatar immediately (don't wait for the
+      // ping timeout). Then disconnect.
+      try { s.emit("leaveWhiteboard", whiteboardId); } catch { /* ignore */ }
+      socketRef.current = null;
+      s?.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whiteboardId]);
 
@@ -159,18 +169,24 @@ export default function WhiteboardEditor() {
   const wireSocket = (s) => {
     setSocket(s);
 
-    // Fires on first connect AND every reconnect — so we re-join the room,
-    // re-announce presence, and re-hydrate the scene after a drop.
+    // Fires on first connect AND every reconnect — re-join the room. We do NOT
+    // announce presence here: the server only joins the room after an async
+    // access check, and it silently drops presence/scene events for a room the
+    // socket hasn't joined yet. Presence is announced from `sceneInit` instead,
+    // which the server emits only AFTER the join succeeds (see below).
     s.on("connect", () => {
       setDisconnected(false);
       s.emit("joinWhiteboard", whiteboardId);
-      s.emit("presence", {
-        whiteboardId,
-        userId: meRef.current.userId,
-        username: meRef.current.username,
+    });
+    s.on("disconnect", () => {
+      setDisconnected(true);
+      // Drop any remote cursors so this user's own view doesn't keep stale ones.
+      remoteCursors.current.clear();
+      apiRef.current?.updateScene({
+        collaborators: new Map(),
+        captureUpdate: CaptureUpdateAction.NEVER,
       });
     });
-    s.on("disconnect", () => setDisconnected(true));
     s.on("accessDenied", ({ reason }) => {
       if (reason === "auth_required") {
         // Board is set to logged-in users only — redirect to login with returnTo.
@@ -215,6 +231,14 @@ export default function WhiteboardEditor() {
 
     let hydrated = false;
     s.on("sceneInit", (scene) => {
+      // The room is now joined server-side (sceneInit is emitted only after a
+      // successful join), so it's safe to announce presence. Fires on initial
+      // join AND every reconnect, so peers always see our avatar promptly.
+      s.emit("presence", {
+        whiteboardId,
+        userId: meRef.current.userId,
+        username: meRef.current.username,
+      });
       // Read share settings from the server's initial payload.
       if (scene?.shareMode) setShareMode(scene.shareMode);
       applyRemoteScene(scene);
@@ -311,15 +335,17 @@ export default function WhiteboardEditor() {
   // --- Local scene change → debounced broadcast (with echo guard) ---
   const handleChange = useCallback(
     (elements, appState, files) => {
-      if (isApplyingRemote.current || !socket) return;
+      if (isApplyingRemote.current || !socketRef.current) return;
       clearTimeout(sceneTimer.current);
       sceneTimer.current = setTimeout(() => {
+        const s = socketRef.current;
+        if (!s) return;
         // Emit including-deleted tombstones at flush time so deletions
         // propagate and stick (the merge keeps the higher version per id).
         const toSend = apiRef.current
           ? apiRef.current.getSceneElementsIncludingDeleted()
           : elements;
-        socket.emit("sceneUpdate", {
+        s.emit("sceneUpdate", {
           whiteboardId,
           elements: toSend,
           appState: { viewBackgroundColor: appState?.viewBackgroundColor },
@@ -338,33 +364,35 @@ export default function WhiteboardEditor() {
       }, SCENE_DEBOUNCE_MS);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [socket, whiteboardId]
+    [whiteboardId]
   );
 
   // --- Local pointer → throttled cursor broadcast ---
   const handlePointer = useCallback(
     ({ pointer }) => {
-      if (!socket || !pointer) return;
+      const s = socketRef.current;
+      if (!s || !pointer) return;
       const now = performance.now();
       if (now - cursorThrottle.current < CURSOR_THROTTLE_MS) return;
       cursorThrottle.current = now;
       const appState = apiRef.current?.getAppState();
       const sel = appState ? Object.keys(appState.selectedElementIds || {}) : [];
-      socket.emit("cursorUpdate", {
+      s.emit("cursorUpdate", {
         whiteboardId,
-        socketId: socket.id,
-        userId: me.userId,
-        username: me.username,
+        socketId: s.id,
+        userId: meRef.current.userId,
+        username: meRef.current.username,
         x: pointer.x,
         y: pointer.y,
-        color: getColorForName(me.username),
+        color: getColorForName(meRef.current.username),
         selectedElementIds: sel,
         scrollX: appState?.scrollX,
         scrollY: appState?.scrollY,
         zoom: appState?.zoom?.value,
       });
     },
-    [socket, whiteboardId, me]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [whiteboardId]
   );
 
   // --- Board name + share settings (fetch on mount) ---
@@ -392,16 +420,25 @@ export default function WhiteboardEditor() {
 
   // Capture a thumbnail when leaving the board (unmount) and when the tab is
   // hidden/closed, so the dashboard card shows the last screen the user saw.
+  // Also announce departure so peers drop our avatar without waiting for the
+  // socket ping timeout. `pagehide` is more reliable than `beforeunload` for
+  // mobile Safari / bfcache and fires on hard tab-close where unmount won't run.
   useEffect(() => {
     const onHide = () => {
       if (document.visibilityState === "hidden") captureRef.current?.();
     };
+    const onPageHide = () => {
+      try { socketRef.current?.emit("leaveWhiteboard", whiteboardId); } catch { /* ignore */ }
+    };
     document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onPageHide);
       captureRef.current?.();
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whiteboardId]);
 
   const commitName = async () => {
     if (isGuest) return;
@@ -463,13 +500,15 @@ export default function WhiteboardEditor() {
   // guests skipped (they can't own boards).
   const captureThumbnail = async () => {
     const api = apiRef.current;
-    if (!api || isGuest) return;
+    if (!api || isGuest || !isOwner) return;
     const elements = api.getSceneElements();
     if (!elements.length) return;
     try {
       const blob = await exportToBlob({
         elements,
-        appState: { ...api.getAppState(), exportBackground: true },
+        // Force a light-themed export so a dark-mode owner still produces a
+        // normal light thumbnail that's consistent for everyone on the dashboard.
+        appState: { ...api.getAppState(), exportBackground: true, theme: "light", viewBackgroundColor: "#ffffff" },
         files: api.getFiles(),
         mimeType: "image/jpeg",
         quality: 0.6,

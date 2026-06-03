@@ -76,8 +76,12 @@ const SharePanel = forwardRef(function SharePanel(
   };
 
   const restricted = shareAccess === "auth";
-  const explicitCollabs = boardCollaborators.filter((c) => c.role !== "visitor");
-  const visitors = boardCollaborators.filter((c) => c.role === "visitor");
+  const explicitCollabs = boardCollaborators.filter(
+    (c) => c.role !== "visitor" && (!isOwner || c.userId !== currentUserId)
+  );
+  const visitors = boardCollaborators.filter(
+    (c) => c.role === "visitor" && (!isOwner || c.userId !== currentUserId)
+  );
 
   const sectionLabel = "mb-1.5 text-xs font-medium text-[var(--surface-muted)]";
   const segBtn = (active, disabled) =>

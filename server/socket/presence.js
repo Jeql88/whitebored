@@ -37,6 +37,26 @@ function clearBoardState(whiteboardId) {
   }
 }
 
+// Remove a socket from one board's presence list and notify the room. Shared by
+// the explicit `leaveWhiteboard` event and the `disconnect` cleanup so both
+// paths behave identically. Returns true if the presence list actually changed.
+function removeSocketFromBoard(io, socket, whiteboardId) {
+  const users = whiteboardUsers[whiteboardId];
+  if (!users) return false;
+  const before = users.length;
+  whiteboardUsers[whiteboardId] = users.filter((u) => u.socketId !== socket.id);
+  const changed = whiteboardUsers[whiteboardId].length !== before;
+  if (changed) {
+    io.to(whiteboardId).emit("whiteboardUsers", whiteboardUsers[whiteboardId]);
+    // Tell remaining peers to drop this user's cursor.
+    io.to(whiteboardId).emit("cursorLeave", { socketId: socket.id });
+  }
+  if (whiteboardUsers[whiteboardId].length === 0) {
+    delete whiteboardUsers[whiteboardId];
+  }
+  return changed;
+}
+
 function registerPresenceHandlers(io, socket) {
   // Announce / refresh this user's presence on a board. Dedupe by userId so a
   // user who reconnects or opens multiple tabs shows as ONE avatar (keep the
@@ -52,6 +72,13 @@ function registerPresenceHandlers(io, socket) {
     );
     whiteboardUsers[whiteboardId].push({ userId: uid, username: name, socketId: socket.id });
     io.to(whiteboardId).emit("whiteboardUsers", whiteboardUsers[whiteboardId]);
+  });
+
+  // Explicit leave (client navigates away / hides the tab) — remove this user's
+  // avatar immediately so peers don't wait for the ping timeout to notice.
+  socket.on("leaveWhiteboard", (whiteboardId) => {
+    if (!whiteboardId || typeof whiteboardId !== "string") return;
+    removeSocketFromBoard(io, socket, whiteboardId);
   });
 
   // Live cursor — high-frequency, never persisted, never echoed to sender.
@@ -91,22 +118,9 @@ function registerPresenceHandlers(io, socket) {
 
   // Clean up presence + notify collaborators on disconnect.
   socket.on("disconnect", () => {
-    for (const [whiteboardId, users] of Object.entries(whiteboardUsers)) {
-      const before = users.length;
-      whiteboardUsers[whiteboardId] = users.filter(
-        (u) => u.socketId !== socket.id
-      );
-      if (whiteboardUsers[whiteboardId].length !== before) {
-        io.to(whiteboardId).emit(
-          "whiteboardUsers",
-          whiteboardUsers[whiteboardId]
-        );
-        // Tell remaining peers to drop this user's cursor.
-        io.to(whiteboardId).emit("cursorLeave", { socketId: socket.id });
-      }
-      if (whiteboardUsers[whiteboardId].length === 0) {
-        delete whiteboardUsers[whiteboardId];
-      }
+    // Snapshot board ids first — removeSocketFromBoard can delete entries.
+    for (const whiteboardId of Object.keys(whiteboardUsers)) {
+      removeSocketFromBoard(io, socket, whiteboardId);
     }
 
     // Clear session chat once the board's room is truly empty. Room membership

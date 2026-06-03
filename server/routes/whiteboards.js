@@ -324,22 +324,27 @@ module.exports = function whiteboardRoutes(io) {
         if (u.id) byId[u.id] = u;
         if (u._id) byId[String(u._id)] = u;
       }
+      const ownerIdStr = String(board.userId);
       const result = [
-        ...collabs.map((c) => ({
-          userId: c.userId,
-          role: c.role,
-          addedAt: c.addedAt,
-          name: byId[c.userId]?.name || byId[c.userId]?.email || c.userId,
-          email: byId[c.userId]?.email || "",
-        })),
+        ...collabs
+          .filter((c) => String(c.userId) !== ownerIdStr)
+          .map((c) => ({
+            userId: c.userId,
+            role: c.role,
+            addedAt: c.addedAt,
+            name: byId[c.userId]?.name || byId[c.userId]?.email || c.userId,
+            email: byId[c.userId]?.email || "",
+          })),
         ...visitors
           .filter((v) => !collabs.some((c) => c.userId === v))
-          .filter((v) => byId[v])  // skip visitors with no resolvable user doc
+          .filter((v) => String(v) !== ownerIdStr)
+          // Show the visitor even if the user doc can't be resolved (edge cases:
+          // deleted account, id shape mismatch) — a labeled row beats vanishing.
           .map((v) => ({
             userId: v,
             role: "visitor",
             addedAt: null,
-            name: byId[v]?.name || "",
+            name: byId[v]?.name || byId[v]?.email || "Link visitor",
             email: byId[v]?.email || "",
           })),
       ];

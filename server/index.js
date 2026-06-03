@@ -32,6 +32,11 @@ const corsOrigin = config.CLIENT_ORIGIN || "http://localhost:5173";
 const io = new Server(server, {
   cors: { origin: corsOrigin, credentials: true, methods: ["GET", "POST", "PATCH", "DELETE"] },
   maxHttpBufferSize: 1e7, // 10 MB
+  // Detect ungraceful disconnects (mobile backgrounding, tab crash) faster so a
+  // departed user's presence avatar is reaped within ~18s instead of ~45s when
+  // the explicit `leaveWhiteboard` signal doesn't fire.
+  pingInterval: 10000,
+  pingTimeout: 8000,
 });
 
 app.use(cors({ origin: corsOrigin, credentials: true }));

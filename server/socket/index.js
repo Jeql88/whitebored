@@ -49,6 +49,10 @@ function initSocket(io) {
       // an explicit collaborator (they already have a stronger relationship).
       const uid = socket.user?.userId;
       const _id = toObjectId(whiteboardId);
+      // TEMP DEBUG: confirm whether an authenticated (incl. Google) visitor is
+      // recognized at handshake. If isGuest is true here, the session cookie
+      // wasn't read and the visitor will never be recorded. Remove once verified.
+      console.log("[visitor] join", { whiteboardId, uid, isGuest: socket.user?.isGuest });
       if (uid && !socket.user?.isGuest && _id) {
         const { whiteboards } = getCollections();
         whiteboards
@@ -60,10 +64,15 @@ function initSocket(io) {
               (Array.isArray(board.collaborators) && board.collaborators.some((c) => String(c.userId) === String(uid))) ||
               (Array.isArray(board.editors) && board.editors.map(String).includes(String(uid)));
             if (!isOwner && !isCollab) {
-              whiteboards.updateOne({ _id }, { $addToSet: { visitors: uid } }).catch(() => {});
+              whiteboards
+                .updateOne({ _id }, { $addToSet: { visitors: uid } })
+                .then((r) => console.log("[visitor] addToSet", { uid, modifiedCount: r.modifiedCount, matchedCount: r.matchedCount }))
+                .catch((e) => console.error("[visitor] addToSet failed:", e.message));
+            } else {
+              console.log("[visitor] skipped (owner/collaborator)", { uid, isOwner, isCollab });
             }
           })
-          .catch(() => {});
+          .catch((e) => console.error("[visitor] board lookup failed:", e.message));
       }
     });
 
