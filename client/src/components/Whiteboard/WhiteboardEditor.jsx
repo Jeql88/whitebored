@@ -25,7 +25,6 @@ import {
   Maximize,
   ScanText,
   X,
-  PenLine,
   LogIn,
 } from "lucide-react";
 
@@ -90,25 +89,10 @@ export default function WhiteboardEditor() {
   const [gridMode, setGridMode] = useState(
     () => localStorage.getItem("wb-grid") === "1"
   );
-  const [penMode, setPenMode] = useState(
-    () => localStorage.getItem("wb-pen") === "1"
-  );
-
   const toggleGrid = () =>
     setGridMode((v) => {
       localStorage.setItem("wb-grid", v ? "0" : "1");
       return !v;
-    });
-
-  const togglePenMode = () =>
-    setPenMode((v) => {
-      const next = !v;
-      localStorage.setItem("wb-pen", next ? "1" : "0");
-      apiRef.current?.updateScene({
-        appState: { penMode: next },
-        captureUpdate: CaptureUpdateAction.NEVER,
-      });
-      return next;
     });
 
   const apiRef = useRef(null); // excalidrawAPI
@@ -751,13 +735,6 @@ export default function WhiteboardEditor() {
             />
           )}
         </div>
-        <button
-          onClick={togglePenMode}
-          className={`${btn} ${penMode ? "bg-brand-600 text-white hover:bg-brand-700" : ""}`}
-          title={penMode ? "Pen mode on (palm rejection active)" : "Enable pen mode (palm rejection)"}
-        >
-          <PenLine size={18} />
-        </button>
         <button onClick={toggleTheme} className={btn} title="Toggle theme">
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
         </button>
@@ -793,7 +770,6 @@ export default function WhiteboardEditor() {
           initialData={{
             appState: {
               viewBackgroundColor: "#ffffff",
-              penMode,
             },
           }}
           UIOptions={{

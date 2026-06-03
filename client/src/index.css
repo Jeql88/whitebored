@@ -69,10 +69,7 @@ body {
   animation: fade-in 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Hide Excalidraw built-ins that duplicate our own header UI */
-.excalidraw .ToolIcon__penMode {
-  display: none !important;
-}
+/* Hide Excalidraw's built-in collaborator list — we have presence avatars in the header */
 .excalidraw .UserList-Wrapper {
   display: none !important;
 }
