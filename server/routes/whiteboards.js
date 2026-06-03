@@ -151,9 +151,9 @@ module.exports = function whiteboardRoutes(io) {
     }
   });
 
-  // Delete a board + its scene snapshot (owner only).
+  // Delete a board + its scene snapshot + comments (owner only).
   router.delete("/:id", authMiddleware, async (req, res) => {
-    const { whiteboards, scenes } = getCollections();
+    const { whiteboards, scenes, comments } = getCollections();
     const whiteboardId = req.params.id;
     const userId = req.user.userId;
 
@@ -167,7 +167,10 @@ module.exports = function whiteboardRoutes(io) {
           .status(404)
           .json({ error: "Whiteboard not found or unauthorized" });
       }
-      await scenes.deleteOne({ whiteboardId });
+      await Promise.all([
+        scenes.deleteOne({ whiteboardId }),
+        comments.deleteMany({ whiteboardId }),
+      ]);
       clearBoardState(whiteboardId); // free in-memory locks/presence/chat
       res.json({ success: true, message: "Whiteboard deleted" });
     } catch (err) {

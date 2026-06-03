@@ -97,6 +97,14 @@ function registerSceneHandlers(io, socket) {
       const existing = await scenes.findOne({ whiteboardId });
       const mergedElements = mergeElements(existing?.elements, elements || []);
       const mergedFiles = { ...(existing?.files || {}), ...(files || {}) };
+      // Re-check size after merge — the pre-merge guard only checks the incoming
+      // payload; the merged doc can still exceed 15MB if the existing scene is large.
+      const mergedBytes = JSON.stringify({ elements: mergedElements, files: mergedFiles }).length;
+      if (mergedBytes > 15_000_000) {
+        const err = new Error("Board too large to save.");
+        err.code = "TOO_LARGE";
+        throw err;
+      }
       await scenes.updateOne(
         { whiteboardId },
         {
@@ -112,7 +120,11 @@ function registerSceneHandlers(io, socket) {
         { upsert: true }
       );
       return { elements: mergedElements, files: mergedFiles };
+    }).catch((err) => {
+      if (err?.code === "TOO_LARGE") socket.emit("sceneError", { error: err.message });
+      return null;
     });
+    if (!merged) return;
 
     // Derive searchable typed text from text elements (free, no OCR).
     const typedText = typedTextOf(merged.elements);

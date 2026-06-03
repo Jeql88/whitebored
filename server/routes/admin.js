@@ -68,13 +68,14 @@ router.get("/users", async (req, res) => {
     const { users, whiteboards } = getCollections();
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Number(req.query.limit) || 20);
-    const search = req.query.search?.trim() || "";
+    const search = (req.query.search?.trim() || "").slice(0, 100);
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    const filter = search
+    const filter = escaped
       ? {
           $or: [
-            { email: { $regex: search, $options: "i" } },
-            { name: { $regex: search, $options: "i" } },
+            { email: { $regex: escaped, $options: "i" } },
+            { name: { $regex: escaped, $options: "i" } },
           ],
         }
       : {};
@@ -151,7 +152,6 @@ router.get("/boards", async (req, res) => {
             userId: 1,
             createdAt: 1,
             updatedAt: 1,
-            thumbnail: 1,
             editors: 1,
             ocrText: 1,
           },
@@ -176,7 +176,6 @@ router.get("/boards", async (req, res) => {
       ownerName: ownerMap[b.userId] || "Unknown",
       createdAt: b.createdAt,
       updatedAt: b.updatedAt,
-      thumbnail: b.thumbnail || null,
       editorsCount: (b.editors || []).length,
       hasOcr: !!(b.ocrText),
     }));
@@ -190,11 +189,14 @@ router.get("/boards", async (req, res) => {
 
 router.delete("/boards/:id", async (req, res) => {
   try {
-    const { whiteboards, scenes } = getCollections();
+    const { whiteboards, scenes, comments } = getCollections();
     const boardId = req.params.id;
+    let _id;
+    try { _id = new ObjectId(boardId); } catch { return res.status(400).json({ error: "Invalid board ID" }); }
     await Promise.all([
-      whiteboards.deleteOne({ _id: new ObjectId(boardId) }),
+      whiteboards.deleteOne({ _id }),
       scenes.deleteOne({ whiteboardId: boardId }),
+      comments.deleteMany({ whiteboardId: boardId }),
     ]);
     res.json({ success: true });
   } catch (err) {
