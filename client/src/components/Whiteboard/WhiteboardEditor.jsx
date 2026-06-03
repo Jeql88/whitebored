@@ -623,11 +623,11 @@ export default function WhiteboardEditor() {
         {isGuest && (
           <a
             href={`/login?returnTo=${encodeURIComponent(window.location.pathname)}`}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent-500/15 px-2 py-1 text-xs font-medium text-accent-600 hover:bg-accent-500/25 transition-colors"
-            title={isViewOnly ? "View only — sign in to edit" : "Viewing as guest — sign in"}
+            className="flex flex-col items-center rounded-md bg-accent-500/15 px-2.5 py-0.5 text-accent-600 hover:bg-accent-500/25 transition-colors leading-tight"
+            title="Sign in for full access"
           >
-            {isViewOnly ? <Lock size={12} /> : <LogIn size={12} />}
-            <span className="hidden sm:inline">{isViewOnly ? "View only" : "Sign in"}</span>
+            <span className="text-[9px] font-medium opacity-70">limited capabilities</span>
+            <span className="text-xs font-semibold">Guest</span>
           </a>
         )}
 
