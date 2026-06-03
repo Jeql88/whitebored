@@ -27,7 +27,7 @@ module.exports = function whiteboardRoutes(io) {
     const { whiteboards } = getCollections();
     const userId = req.user.userId;
     const boards = await whiteboards
-      .find({ $or: [{ userId }, { editors: userId }, { "collaborators.userId": userId }] })
+      .find({ $or: [{ userId }, { editors: userId }, { "collaborators.userId": userId }, { visitors: userId }] })
       .sort({ updatedAt: -1 })
       .toArray();
     res.json(boards);
@@ -298,24 +298,40 @@ module.exports = function whiteboardRoutes(io) {
     try {
       const board = await whiteboards.findOne(
         { _id: new ObjectId(whiteboardId) },
-        { projection: { userId: 1, collaborators: 1 } }
+        { projection: { userId: 1, collaborators: 1, visitors: 1 } }
       );
       if (!board) return res.status(404).json({ error: "Not found" });
       if (String(board.userId) !== String(userId)) return res.status(403).json({ error: "Not authorized" });
       const collabs = Array.isArray(board.collaborators) ? board.collaborators : [];
-      if (!collabs.length) return res.json([]);
-      const userIds = collabs.map((c) => c.userId);
+      const visitors = Array.isArray(board.visitors) ? board.visitors : [];
+      // Combine all user IDs for a single lookup.
+      const allIds = [
+        ...collabs.map((c) => c.userId),
+        ...visitors.filter((v) => !collabs.some((c) => c.userId === v)),
+      ];
+      if (!allIds.length) return res.json([]);
       const userDocs = await users
-        .find({ id: { $in: userIds } }, { projection: { id: 1, name: 1, email: 1 } })
+        .find({ id: { $in: allIds } }, { projection: { id: 1, name: 1, email: 1 } })
         .toArray();
       const byId = Object.fromEntries(userDocs.map((u) => [u.id, u]));
-      const result = collabs.map((c) => ({
-        userId: c.userId,
-        role: c.role,
-        addedAt: c.addedAt,
-        name: byId[c.userId]?.name || byId[c.userId]?.email || c.userId,
-        email: byId[c.userId]?.email || "",
-      }));
+      const result = [
+        ...collabs.map((c) => ({
+          userId: c.userId,
+          role: c.role,
+          addedAt: c.addedAt,
+          name: byId[c.userId]?.name || byId[c.userId]?.email || c.userId,
+          email: byId[c.userId]?.email || "",
+        })),
+        ...visitors
+          .filter((v) => !collabs.some((c) => c.userId === v))
+          .map((v) => ({
+            userId: v,
+            role: "visitor",
+            addedAt: null,
+            name: byId[v]?.name || byId[v]?.email || v,
+            email: byId[v]?.email || "",
+          })),
+      ];
       res.json(result);
     } catch (err) {
       console.error(err);
@@ -414,7 +430,7 @@ module.exports = function whiteboardRoutes(io) {
       await whiteboards.updateOne(
         { _id: new ObjectId(whiteboardId) },
         {
-          $pull: { collaborators: { userId: targetId }, editors: targetId },
+          $pull: { collaborators: { userId: targetId }, editors: targetId, visitors: targetId },
         }
       );
       res.json({ success: true });

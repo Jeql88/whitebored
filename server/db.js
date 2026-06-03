@@ -37,10 +37,11 @@ async function connectDB() {
     { unique: true, sparse: true }
   );
 
-  // Dashboard lists boards by owner OR editor OR collaborator — index all three.
+  // Dashboard lists boards by owner OR editor OR collaborator OR visitor.
   await collections.whiteboards.createIndex({ userId: 1 });
   await collections.whiteboards.createIndex({ editors: 1 });
   await collections.whiteboards.createIndex({ "collaborators.userId": 1 });
+  await collections.whiteboards.createIndex({ visitors: 1 });
   // Content search across board name + extracted text (typed + OCR).
   await collections.whiteboards.createIndex({ textIndex: "text", name: "text" });
 

@@ -4,7 +4,8 @@
 const { socketAuth } = require("../middleware/auth");
 const { registerSceneHandlers, loadScene } = require("./scene");
 const { registerPresenceHandlers, getChatHistory } = require("./presence");
-const { canAccessBoard, getBoard } = require("../auth/boards");
+const { canAccessBoard, getBoard, toObjectId } = require("../auth/boards");
+const { getCollections } = require("../db");
 
 function initSocket(io) {
   io.use(socketAuth);
@@ -42,6 +43,28 @@ function initSocket(io) {
       }
 
       socket.emit("chatHistory", getChatHistory(whiteboardId));
+
+      // Track authenticated link visitors so the board appears in their
+      // "Shared with me" dashboard — but only if they're not the owner or
+      // an explicit collaborator (they already have a stronger relationship).
+      const uid = socket.user?.userId;
+      const _id = toObjectId(whiteboardId);
+      if (uid && !socket.user?.isGuest && _id) {
+        const { whiteboards } = getCollections();
+        whiteboards
+          .findOne({ _id }, { projection: { userId: 1, collaborators: 1, editors: 1 } })
+          .then((board) => {
+            if (!board) return;
+            const isOwner = String(board.userId) === String(uid);
+            const isCollab =
+              (Array.isArray(board.collaborators) && board.collaborators.some((c) => String(c.userId) === String(uid))) ||
+              (Array.isArray(board.editors) && board.editors.map(String).includes(String(uid)));
+            if (!isOwner && !isCollab) {
+              whiteboards.updateOne({ _id }, { $addToSet: { visitors: uid } }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
     });
 
     // Owner can change shareMode live — verify ownership before broadcasting.
