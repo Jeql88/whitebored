@@ -5,7 +5,10 @@ import AuthLayout from "./AuthLayout";
 
 function GoogleButton({ label, returnTo = "/whiteboards" }) {
   const handleGoogle = async () => {
-    await authClient.signIn.social({ provider: "google", callbackURL: returnTo });
+    const callbackURL = returnTo.startsWith("http")
+      ? returnTo
+      : `${window.location.origin}${returnTo}`;
+    await authClient.signIn.social({ provider: "google", callbackURL });
   };
   return (
     <button
