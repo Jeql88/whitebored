@@ -79,9 +79,13 @@ const SharePanel = forwardRef(function SharePanel(
   const visitors = boardCollaborators.filter((c) => c.role === "visitor");
 
   const sectionLabel = "mb-1.5 text-xs font-medium text-[var(--surface-muted)]";
-  const segBtn = (active) =>
-    `flex-1 py-1.5 text-xs font-medium transition-colors ${
-      active
+  const segBtn = (active, disabled) =>
+    `flex-1 py-2 text-xs font-medium transition-colors ${
+      disabled
+        ? active
+          ? "bg-brand-600/40 text-white/60 cursor-not-allowed"
+          : "text-[var(--surface-muted)]/50 cursor-not-allowed"
+        : active
         ? "bg-brand-600 text-white"
         : "text-[var(--surface-muted)] hover:bg-[var(--surface-border)]"
     }`;
@@ -226,37 +230,40 @@ const SharePanel = forwardRef(function SharePanel(
       {/* General access */}
       <div className="mb-4">
         <p className={sectionLabel}>General access</p>
-        <div className="flex gap-1.5">
+        <div className="flex flex-col gap-2">
           {/* shareAccess toggle */}
-          <div className="flex flex-1 overflow-hidden rounded-lg border border-[var(--surface-border)]">
+          <div className="flex overflow-hidden rounded-lg border border-[var(--surface-border)]">
             <button
               onClick={() => isOwner && onShareAccessChange("anyone")}
-              className={segBtn(!restricted)}
+              className={segBtn(!restricted, !isOwner)}
               disabled={!isOwner}
             >
               Anyone with link
             </button>
             <button
               onClick={() => isOwner && onShareAccessChange("auth")}
-              className={segBtn(restricted)}
+              className={segBtn(restricted, !isOwner)}
               disabled={!isOwner}
             >
               Restricted
             </button>
           </div>
-          {/* shareMode toggle — only meaningful when not restricted */}
+          {/* shareMode toggle — greyed when restricted */}
           <div className={`flex overflow-hidden rounded-lg border border-[var(--surface-border)] ${restricted ? "opacity-40 pointer-events-none" : ""}`}>
             {[["edit", "Editor"], ["view", "Viewer"]].map(([m, label]) => (
               <button
                 key={m}
                 onClick={() => isOwner && onShareModeChange(m)}
-                className={segBtn(shareMode === m)}
+                className={segBtn(shareMode === m, !isOwner)}
                 disabled={!isOwner}
               >
                 {label}
               </button>
             ))}
           </div>
+          {!isOwner && (
+            <p className="text-[10px] text-[var(--surface-muted)]">Only the board owner can change these settings.</p>
+          )}
         </div>
       </div>
 
