@@ -360,7 +360,7 @@ module.exports = function whiteboardRoutes(io) {
 
   // PATCH /:id/collaborators/:userId — owner changes a collaborator's role.
   router.patch("/:id/collaborators/:userId", authMiddleware, async (req, res) => {
-    if (!toObjectId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+    if (!toObjectId(req.params.id) || !req.params.userId?.trim()) return res.status(400).json({ error: "Invalid ID" });
     const { whiteboards } = getCollections();
     const whiteboardId = req.params.id;
     const ownerId = req.user.userId;
@@ -397,7 +397,7 @@ module.exports = function whiteboardRoutes(io) {
 
   // DELETE /:id/collaborators/:userId — owner removes someone, or user removes themselves.
   router.delete("/:id/collaborators/:userId", authMiddleware, async (req, res) => {
-    if (!toObjectId(req.params.id)) return res.status(400).json({ error: "Invalid ID" });
+    if (!toObjectId(req.params.id) || !req.params.userId?.trim()) return res.status(400).json({ error: "Invalid ID" });
     const { whiteboards } = getCollections();
     const whiteboardId = req.params.id;
     const requesterId = req.user.userId;

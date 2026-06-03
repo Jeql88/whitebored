@@ -586,7 +586,8 @@ export default function WhiteboardEditor() {
   const isOwner = !isGuest && !!ownerId && me.userId === ownerId;
 
   // View-only: anyone who isn't the owner and the board is set to view-only.
-  const isViewOnly = shareMode === "view" && !isOwner;
+  // Defer until ownerId resolves (isGuest users have no ownerId to wait for).
+  const isViewOnly = shareMode === "view" && (isGuest ? true : !!ownerId && !isOwner);
 
   // Load explicit collaborators when the owner opens the share panel.
   useEffect(() => {
