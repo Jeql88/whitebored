@@ -112,27 +112,26 @@ export default function WhiteboardEditor() {
 
   const { data: session } = useSession();
 
-  // Identity: logged-in user, or a stable guest id for shared-link access.
-  const identity = useRef(null);
-  if (!identity.current) {
-    if (session?.user) {
-      identity.current = {
+  // Stable guest ID persisted for this tab so a guest keeps ONE identity
+  // across reloads/reconnects (avoids duplicate avatars).
+  const guestId = useRef(null);
+  if (!guestId.current) {
+    let gid = sessionStorage.getItem("wb-guest-id");
+    if (!gid) {
+      gid = `guest-${(crypto.randomUUID?.() || `${performance.now()}`).toString().slice(0, 8)}`;
+      sessionStorage.setItem("wb-guest-id", gid);
+    }
+    guestId.current = gid;
+  }
+
+  // Derive identity reactively from session so it updates once BetterAuth loads.
+  const isGuest = !session?.user;
+  const me = session?.user
+    ? {
         userId: session.user.id,
         username: session.user.name || session.user.email || session.user.id,
-      };
-    } else {
-      let gid = sessionStorage.getItem("wb-guest-id");
-      if (!gid) {
-        gid = `guest-${(crypto.randomUUID?.() || `${performance.now()}`)
-          .toString()
-          .slice(0, 8)}`;
-        sessionStorage.setItem("wb-guest-id", gid);
       }
-      identity.current = { userId: gid, username: "Guest" };
-    }
-  }
-  const me = identity.current;
-  const isGuest = !session?.user;
+    : { userId: guestId.current, username: "Guest" };
 
   // --- Socket lifecycle ---
   // BetterAuth uses cookies — Socket.IO sends them automatically via withCredentials.

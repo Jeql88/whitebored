@@ -17,10 +17,17 @@ async function authMiddleware(req, res, next) {
 }
 
 // Socket.IO handshake auth: verified user, or guest fallback for shared links.
+// socket.request is the raw Node.js http.IncomingMessage from the WS upgrade —
+// it reliably carries the cookie header. We build a minimal Headers object so
+// BetterAuth can verify the session cookie without relying on fromNodeHeaders()
+// which doesn't handle Socket.IO's non-standard handshake object.
 async function socketAuth(socket, next) {
-  // Try cookie-based session from the handshake headers.
   try {
-    const headers = fromNodeHeaders(socket.handshake.headers);
+    const cookie =
+      socket.request?.headers?.cookie ||
+      socket.handshake?.headers?.cookie ||
+      "";
+    const headers = new Headers({ cookie });
     const session = await auth.api.getSession({ headers });
     if (session?.user) {
       socket.user = {

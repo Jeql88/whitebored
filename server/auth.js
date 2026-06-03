@@ -10,7 +10,12 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const auth = betterAuth({
   baseURL: BETTER_AUTH_URL,
   secret: BETTER_AUTH_SECRET,
-  trustedOrigins: [CLIENT_ORIGIN, BETTER_AUTH_URL].filter(Boolean),
+  trustedOrigins: [
+    CLIENT_ORIGIN,
+    BETTER_AUTH_URL,
+    "http://localhost:5173",
+    "http://localhost:4000",
+  ].filter(Boolean),
 
   database: mongodbAdapter(db, { client }),
 
