@@ -527,6 +527,7 @@ export default function WhiteboardEditor() {
   // Render the board to a downscaled image and send it for handwriting OCR;
   // the recognized text is added to this board's search index server-side.
   const extractTextNow = async () => {
+    if (isGuest) return showToast("Sign in to use OCR text extraction.");
     const api = apiRef.current;
     if (!api) return;
     const els = api.getSceneElements();
@@ -777,11 +778,9 @@ export default function WhiteboardEditor() {
             <MainMenu.Item onSelect={zoomToFit} icon={<Maximize size={16} />}>
               Zoom to fit
             </MainMenu.Item>
-            {!isGuest && (
-              <MainMenu.Item onSelect={extractTextNow} icon={<ScanText size={16} />}>
-                Extract text (OCR)
-              </MainMenu.Item>
-            )}
+            <MainMenu.Item onSelect={extractTextNow} icon={<ScanText size={16} />}>
+              Extract text (OCR)
+            </MainMenu.Item>
             <MainMenu.Item onSelect={toggleGrid} icon={<Grid3x3 size={16} />}>
               {gridMode ? "Hide grid" : "Show grid"}
             </MainMenu.Item>
