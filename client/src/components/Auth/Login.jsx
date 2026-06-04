@@ -8,8 +8,8 @@ function GoogleButton({ label, returnTo = "/whiteboards" }) {
     const callbackURL = returnTo.startsWith("http")
       ? returnTo
       : `${window.location.origin}${returnTo}`;
-    const errorURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
-    await authClient.signIn.social({ provider: "google", callbackURL, errorURL });
+    const errorCallbackURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
+    await authClient.signIn.social({ provider: "google", callbackURL, errorCallbackURL });
   };
   return (
     <button
