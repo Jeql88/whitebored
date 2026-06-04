@@ -41,6 +41,10 @@ const auth = betterAuth({
       google: {
         clientId: GOOGLE_CLIENT_ID,
         clientSecret: GOOGLE_CLIENT_SECRET,
+        // Google already verified the email — trust it and mark the user verified.
+        mapProfileToUser: (profile) => ({
+          emailVerified: profile.email_verified === true,
+        }),
       },
     },
   } : {}),

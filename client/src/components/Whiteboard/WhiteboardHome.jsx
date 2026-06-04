@@ -10,7 +10,6 @@ import {
 import WhiteboardCard from "./WhiteBoardCard.jsx";
 import ThemeToggle from "../ThemeToggle";
 import UserMenu from "../UserMenu";
-import VerifyBanner from "../VerifyBanner";
 
 const PAGE_SIZE = 8;
 
@@ -205,8 +204,6 @@ export default function WhiteboardHome() {
           <UserMenu />
         </div>
       </header>
-
-      <VerifyBanner />
 
       <main className="mx-auto max-w-5xl px-6 py-8">
         {/* Search + sort/filter bar */}
