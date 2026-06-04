@@ -17,6 +17,14 @@ const auth = betterAuth({
     "http://localhost:5173",
     "http://localhost:4000",
   ].filter(Boolean),
+  advanced: {
+    crossSubdomainCookies: { enabled: false },
+    defaultCookieAttributes: {
+      sameSite: "none",
+      secure: true,
+      partitioned: true,
+    },
+  },
 
   database: mongodbAdapter(db, { client }),
 
