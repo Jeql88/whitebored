@@ -8,7 +8,8 @@ function GoogleButton({ label, returnTo = "/whiteboards" }) {
     const callbackURL = returnTo.startsWith("http")
       ? returnTo
       : `${window.location.origin}${returnTo}`;
-    await authClient.signIn.social({ provider: "google", callbackURL });
+    const errorURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
+    await authClient.signIn.social({ provider: "google", callbackURL, errorURL });
   };
   return (
     <button
@@ -25,10 +26,17 @@ function GoogleButton({ label, returnTo = "/whiteboards" }) {
 const inputCls =
   "w-full rounded-lg border border-[var(--surface-border)] bg-transparent px-3 py-2.5 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30";
 
+const OAUTH_ERRORS = {
+  unable_to_link_account: "This email is already registered with a password. Please sign in with your password instead.",
+  account_already_linked_to_different_user: "This Google account is already linked to a different account.",
+};
+
 export default function Login() {
   const [searchParams] = useSearchParams();
   const raw = searchParams.get("returnTo") || "/whiteboards";
   const returnTo = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/whiteboards";
+  const oauthError = searchParams.get("error");
+  const oauthErrorMsg = oauthError ? (OAUTH_ERRORS[oauthError] ?? "Google sign-in failed. Please try again.") : null;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -61,6 +69,11 @@ export default function Login() {
       }
     >
       <div className="space-y-3">
+        {oauthErrorMsg && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
+            {oauthErrorMsg}
+          </div>
+        )}
         <GoogleButton label="Continue with Google" returnTo={returnTo} />
         <div className="flex items-center gap-3 text-xs text-[var(--surface-muted)]">
           <div className="flex-1 border-t border-[var(--surface-border)]" />
