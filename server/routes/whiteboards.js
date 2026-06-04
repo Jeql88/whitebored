@@ -97,8 +97,23 @@ module.exports = function whiteboardRoutes(io) {
 
   // Create a board.
   router.post("/", authMiddleware, createLimit, async (req, res) => {
-    const { whiteboards } = getCollections();
+    const { whiteboards, users } = getCollections();
     const userId = req.user.userId;
+
+    // Unverified accounts are capped at 5 boards.
+    const oid = toObjectId(userId);
+    const userDoc = await users.findOne(
+      { $or: [{ id: userId }, ...(oid ? [{ _id: oid }] : [])] },
+      { projection: { emailVerified: 1 } }
+    );
+    if (!userDoc?.emailVerified) {
+      const boardCount = await whiteboards.countDocuments({ userId });
+      if (boardCount >= 5) {
+        return res.status(403).json({
+          error: "Unverified accounts are limited to 5 boards. Contact the admin to get verified.",
+        });
+      }
+    }
 
     let name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
     if (!name) name = "Untitled";

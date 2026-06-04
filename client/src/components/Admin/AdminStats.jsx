@@ -54,24 +54,20 @@ export default function AdminStats() {
         <h3 className="mb-4 text-sm font-semibold text-[var(--surface-text)]">
           Boards created — last 7 days
         </h3>
-        {stats.dailyBoards?.length ? (
-          <div className="flex items-end gap-2 h-32">
-            {stats.dailyBoards.map((d) => (
-              <div key={d._id} className="flex flex-1 flex-col items-center gap-1">
-                <span className="text-xs text-[var(--surface-muted)]">{d.count}</span>
-                <div
-                  className="w-full rounded-t bg-brand-600"
-                  style={{ height: `${Math.round((d.count / maxDay) * 100)}%`, minHeight: 4 }}
-                />
-                <span className="text-[10px] text-[var(--surface-muted)]">
-                  {d._id.slice(5)}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-[var(--surface-muted)]">No boards created in the last 7 days.</p>
-        )}
+        <div className="flex items-end gap-2 h-32">
+          {(stats.dailyBoards || []).map((d) => (
+            <div key={d._id} className="flex flex-1 flex-col items-center gap-1">
+              <span className="text-xs text-[var(--surface-muted)]">{d.count > 0 ? d.count : ""}</span>
+              <div
+                className="w-full rounded-t bg-brand-600"
+                style={{ height: `${Math.round((d.count / maxDay) * 100)}%`, minHeight: d.count > 0 ? 4 : 2, opacity: d.count > 0 ? 1 : 0.15 }}
+              />
+              <span className="text-[10px] text-[var(--surface-muted)]">
+                {new Date(d._id + "T00:00:00").toLocaleDateString("en", { weekday: "short" })}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

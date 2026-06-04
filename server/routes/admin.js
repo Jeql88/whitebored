@@ -45,7 +45,13 @@ router.get("/stats", async (req, res) => {
       },
       { $sort: { _id: 1 } },
     ];
-    const dailyBoards = await whiteboards.aggregate(dailyPipeline).toArray();
+    const dailyBoardsRaw = await whiteboards.aggregate(dailyPipeline).toArray();
+    // Fill all 7 days so the chart always has a complete x-axis (missing days = 0).
+    const dailyMap = Object.fromEntries(dailyBoardsRaw.map((d) => [d._id, d.count]));
+    const dailyBoards = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(Date.now() - (6 - i) * 86_400_000).toISOString().slice(0, 10);
+      return { _id: date, count: dailyMap[date] || 0 };
+    });
 
     res.json({
       totalUsers,
@@ -133,6 +139,24 @@ router.delete("/users/:id", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("[admin] delete user error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Manually verify a user's email — used when no email sending is available.
+router.patch("/users/:id/verify", async (req, res) => {
+  try {
+    const { users } = getCollections();
+    const targetId = req.params.id;
+    const oid = toObjectId(targetId);
+    const result = await users.updateOne(
+      { $or: [{ id: targetId }, ...(oid ? [{ _id: oid }] : [])] },
+      { $set: { emailVerified: true } }
+    );
+    if (result.matchedCount === 0) return res.status(404).json({ error: "User not found" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[admin] verify user error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });

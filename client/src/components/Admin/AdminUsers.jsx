@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Search, Trash2, CheckCircle, XCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { getAdminUsers, deleteAdminUser } from "../../api/admin";
+import { Search, Trash2, CheckCircle, XCircle, ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
+import { getAdminUsers, deleteAdminUser, verifyAdminUser } from "../../api/admin";
 import { formatDistanceToNow } from "date-fns";
 
 export default function AdminUsers({ onFilterBoards }) {
@@ -81,13 +81,27 @@ export default function AdminUsers({ onFilterBoards }) {
                   </button>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setConfirmDelete(u)}
-                    className="rounded-md p-1.5 text-[var(--surface-muted)] hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-                    title="Delete user"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  <div className="flex items-center justify-end gap-1">
+                    {!u.emailVerified && (
+                      <button
+                        onClick={async () => {
+                          await verifyAdminUser(u.id);
+                          load();
+                        }}
+                        className="rounded-md p-1.5 text-[var(--surface-muted)] hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-500/10"
+                        title="Verify user"
+                      >
+                        <ShieldCheck size={15} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setConfirmDelete(u)}
+                      className="rounded-md p-1.5 text-[var(--surface-muted)] hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                      title="Delete user"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

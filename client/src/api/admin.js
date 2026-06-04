@@ -8,3 +8,4 @@ export const deleteAdminUser = (id) => apiFetch(`${A}/users/${id}`, { method: "D
 export const getAdminBoards = (params = {}) => apiFetch(`${A}/boards?${new URLSearchParams(params)}`);
 export const deleteAdminBoard = (id) => apiFetch(`${A}/boards/${id}`, { method: "DELETE" });
 export const getAdminLive = () => apiFetch(`${A}/live`);
+export const verifyAdminUser = (id) => apiFetch(`${A}/users/${id}/verify`, { method: "PATCH" });
