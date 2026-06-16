@@ -34,7 +34,12 @@ function EditorFallback() {
 
 function Protected({ children }) {
   const { data: session, isPending } = useSession();
-  if (isPending) return null;
+  if (isPending) return (
+    <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-[var(--surface-bg)] text-[var(--surface-muted)]">
+      <div className="h-7 w-7 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      <p className="text-sm">Connecting…</p>
+    </div>
+  );
   if (!session) {
     const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
     return <Navigate to={`/login?returnTo=${returnTo}`} />;

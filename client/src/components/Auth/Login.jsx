@@ -41,6 +41,11 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showWakeNotice, setShowWakeNotice] = useState(false);
+  React.useEffect(() => {
+    const t = setTimeout(() => setShowWakeNotice(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -80,6 +85,11 @@ export default function Login() {
           or
           <div className="flex-1 border-t border-[var(--surface-border)]" />
         </div>
+        {showWakeNotice && (
+          <p className="text-center text-xs text-[var(--surface-muted)]">
+            Server may be waking up — first load can take ~30s
+          </p>
+        )}
       </div>
       <form onSubmit={handleSubmit} className="mt-3 space-y-3">
         <input
