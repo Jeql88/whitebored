@@ -19,6 +19,12 @@ const auth = betterAuth({
   ].filter(Boolean),
   advanced: {
     crossSubdomainCookies: { enabled: false },
+    useSecureCookies: true,
+    defaultCookieAttributes: {
+      sameSite: "none",
+      secure: true,
+      httpOnly: true,
+    },
   },
 
   database: mongodbAdapter(db, { client }),

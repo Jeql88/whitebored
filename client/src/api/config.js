@@ -1,12 +1,9 @@
-// HTTP API base — routes through Vercel proxy in prod so cookies are same-site.
-// In dev, Vite proxies /api to localhost:4000.
+// API + Socket.IO base URL.
+// In dev, Vite proxies /api and /socket.io to localhost:4000.
 export const API_BASE =
   import.meta.env.VITE_API_BASE ?? window.location.origin;
 
-// Socket.IO must connect directly to the backend (Vercel can't proxy WebSockets).
-// Falls back to API_BASE in dev (same host via Vite proxy).
-export const SOCKET_BASE =
-  import.meta.env.VITE_SOCKET_BASE ?? API_BASE;
+export const SOCKET_BASE = import.meta.env.VITE_SOCKET_BASE ?? API_BASE;
 
 let redirecting = false;
 function handleUnauthorized() {
