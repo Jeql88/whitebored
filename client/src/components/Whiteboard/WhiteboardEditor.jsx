@@ -28,7 +28,7 @@ import {
   LogIn,
 } from "lucide-react";
 
-import { API_BASE } from "../../api/config";
+import { SOCKET_BASE } from "../../api/config";
 import { updateWhiteboard, saveThumbnail, extractText, updateShareSettings, getCollaborators } from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
@@ -135,7 +135,7 @@ export default function WhiteboardEditor() {
   // --- Socket lifecycle ---
   // BetterAuth uses cookies — Socket.IO sends them automatically via withCredentials.
   useEffect(() => {
-    const s = io(API_BASE, { withCredentials: true });
+    const s = io(SOCKET_BASE, { withCredentials: true });
     socketRef.current = s;
     setSocket(s);
     wireSocket(s);
