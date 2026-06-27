@@ -1,6 +1,6 @@
 const { betterAuth } = require("better-auth");
 const { mongodbAdapter } = require("@better-auth/mongo-adapter");
-const { admin } = require("better-auth/plugins");
+const { admin, oneTimeToken } = require("better-auth/plugins");
 const { client, db } = require("./db");
 const { sendVerifyEmail, sendResetEmail } = require("./email");
 const { BETTER_AUTH_SECRET, BETTER_AUTH_URL, CLIENT_ORIGIN } = require("./config");
@@ -69,7 +69,7 @@ const auth = betterAuth({
     },
   },
 
-  plugins: [admin()],
+  plugins: [admin(), oneTimeToken({ setOttHeaderOnNewSession: true })],
 });
 
 module.exports = { auth };

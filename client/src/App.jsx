@@ -1,11 +1,11 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
 } from "react-router-dom";
-import { useSession } from "./lib/auth-client";
+import { useSession, exchangeOtt } from "./lib/auth-client";
 import Login from "./components/Auth/Login";
 import Register from "./components/Auth/Register";
 import ForgotPassword from "./components/Auth/ForgotPassword";
@@ -32,6 +32,27 @@ function EditorFallback() {
   );
 }
 
+function OttExchange({ children }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ott = params.get("ott");
+    if (!ott) { setDone(true); return; }
+    // Remove ott from URL immediately so it isn't bookmarked or leaked.
+    params.delete("ott");
+    const clean = window.location.pathname + (params.size ? "?" + params : "");
+    window.history.replaceState(null, "", clean);
+    exchangeOtt(ott).finally(() => setDone(true));
+  }, []);
+  if (!done) return (
+    <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-[var(--surface-bg)] text-[var(--surface-muted)]">
+      <div className="h-7 w-7 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      <p className="text-sm">Signing in…</p>
+    </div>
+  );
+  return children;
+}
+
 function Protected({ children }) {
   const { data: session, isPending } = useSession();
   if (isPending) return (
@@ -51,6 +72,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <Router>
+      <OttExchange>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -88,6 +110,7 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/whiteboards" />} />
         </Routes>
+      </OttExchange>
       </Router>
     </ThemeProvider>
   );
