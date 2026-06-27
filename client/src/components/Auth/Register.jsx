@@ -1,16 +1,15 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../../lib/auth-client";
-import { API_BASE } from "../../api/config";
 import AuthLayout from "./AuthLayout";
 
 function GoogleButton() {
-  const handleGoogle = () => {
-    const params = new URLSearchParams({
+  const handleGoogle = async () => {
+    await authClient.signIn.social({
+      provider: "google",
       callbackURL: `${window.location.origin}/whiteboards`,
       errorCallbackURL: `${window.location.origin}/login`,
     });
-    window.location.href = `${API_BASE}/api/auth/sign-in/social/google?${params}`;
   };
   return (
     <button
