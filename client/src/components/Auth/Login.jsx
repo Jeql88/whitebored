@@ -1,15 +1,19 @@
 import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { authClient } from "../../lib/auth-client";
+import { API_BASE } from "../../api/config";
 import AuthLayout from "./AuthLayout";
 
 function GoogleButton({ label, returnTo = "/whiteboards" }) {
-  const handleGoogle = async () => {
+  const handleGoogle = () => {
     const callbackURL = returnTo.startsWith("http")
       ? returnTo
       : `${window.location.origin}${returnTo}`;
     const errorCallbackURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
-    await authClient.signIn.social({ provider: "google", callbackURL, errorCallbackURL });
+    // Navigate directly to the backend OAuth endpoint instead of using the
+    // BetterAuth fetch client — avoids credentials:omit on cross-site requests.
+    const params = new URLSearchParams({ callbackURL, errorCallbackURL });
+    window.location.href = `${API_BASE}/api/auth/sign-in/social/google?${params}`;
   };
   return (
     <button
