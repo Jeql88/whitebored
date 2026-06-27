@@ -5,28 +5,15 @@ import { API_BASE } from "../../api/config";
 import AuthLayout from "./AuthLayout";
 
 function GoogleButton({ label, returnTo = "/whiteboards" }) {
-  const handleGoogle = async () => {
+  const handleGoogle = () => {
     const callbackURL = returnTo.startsWith("http")
       ? returnTo
       : `${window.location.origin}${returnTo}`;
     const errorCallbackURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
-    const res = await fetch(`${API_BASE}/api/auth/sign-in/social`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "google", callbackURL, errorCallbackURL }),
-      credentials: "include",
-    });
-    const text = await res.text().catch(() => "");
-    console.log("[google-auth] status:", res.status, "body:", text);
-    let json = null;
-    try { json = JSON.parse(text); } catch {}
-    const url = json?.url;
-    console.log("[google-auth] redirecting to:", url);
-    if (url) {
-      window.location.assign(url);
-    } else {
-      console.error("[google-auth] no url in response", json);
-    }
+    // Navigate directly to the server's OAuth shim — first-party navigation so
+    // the state cookie is set on onrender.com and survives the Google callback.
+    const params = new URLSearchParams({ callbackURL, errorCallbackURL });
+    window.location.assign(`${API_BASE}/api/oauth/google?${params}`);
   };
   return (
     <button

@@ -54,6 +54,31 @@ app.use(compression());
 // BetterAuth handler must come BEFORE express.json() — it reads the raw body itself.
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
+// GET redirect shim for Google OAuth — the browser navigates here directly so
+// the state cookie is set first-party on onrender.com (cross-origin fetch blocks
+// Set-Cookie, causing state_mismatch on the callback).
+app.get("/api/oauth/google", async (req, res) => {
+  const callbackURL = req.query.callbackURL || config.CLIENT_ORIGIN + "/whiteboards";
+  const errorCallbackURL = req.query.errorCallbackURL || config.CLIENT_ORIGIN + "/login";
+  try {
+    const result = await auth.api.signInSocial({
+      body: { provider: "google", callbackURL, errorCallbackURL },
+      headers: new Headers({ "Content-Type": "application/json" }),
+      asResponse: true,
+    });
+    // Forward all Set-Cookie headers (state cookie) then redirect to Google.
+    const setCookie = result.headers.get("set-cookie");
+    if (setCookie) res.setHeader("Set-Cookie", setCookie);
+    const body = await result.json();
+    const url = body?.url;
+    if (url) return res.redirect(url);
+    res.redirect(errorCallbackURL);
+  } catch (err) {
+    console.error("[oauth/google]", err.message);
+    res.redirect(errorCallbackURL);
+  }
+});
+
 app.use(express.json({ limit: "10mb" }));
 
 // Liveness probe — returns 503 if DB is unreachable.
