@@ -9,7 +9,10 @@ function GoogleButton({ label, returnTo = "/whiteboards" }) {
       ? returnTo
       : `${window.location.origin}${returnTo}`;
     const errorCallbackURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
-    await authClient.signIn.social({ provider: "google", callbackURL, errorCallbackURL });
+    const data = await authClient.signIn.social({ provider: "google", callbackURL, errorCallbackURL });
+    // Manually redirect if the client plugin didn't — handles cross-origin fetch quirks.
+    const url = data?.data?.url || data?.url;
+    if (url) window.location.href = url;
   };
   return (
     <button
