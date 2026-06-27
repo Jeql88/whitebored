@@ -54,29 +54,25 @@ app.use(compression());
 // BetterAuth handler must come BEFORE express.json() — it reads the raw body itself.
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
-// GET redirect shim for Google OAuth — the browser navigates here directly so
-// the state cookie is set first-party on onrender.com (cross-origin fetch blocks
-// Set-Cookie, causing state_mismatch on the callback).
-//
-// We intercept the callbackURL to point back here (/api/oauth/google/callback)
-// so we can read the one-time-token from the set-ott header and forward it to
-// the Vercel frontend as a query param — solving the third-party cookie problem.
+// GET /api/oauth/google — browser navigates here directly (first-party to Render)
+// so the state cookie is set on onrender.com, not via cross-origin fetch.
+// callbackURL points to /api/oauth/done on this server so we can generate an OTT
+// after BetterAuth sets the session, then redirect to Vercel with ?ott=.
 app.get("/api/oauth/google", async (req, res) => {
   const finalCallbackURL = req.query.callbackURL || config.CLIENT_ORIGIN + "/whiteboards";
   const errorCallbackURL = req.query.errorCallbackURL || config.CLIENT_ORIGIN + "/login";
-  // Intercept the callback through this server so we can attach the OTT.
-  const interceptCallbackURL = `${config.BETTER_AUTH_URL}/api/oauth/google/callback?finalCallbackURL=${encodeURIComponent(finalCallbackURL)}&errorCallbackURL=${encodeURIComponent(errorCallbackURL)}`;
+  const doneURL = `${config.BETTER_AUTH_URL}/api/oauth/done?to=${encodeURIComponent(finalCallbackURL)}&err=${encodeURIComponent(errorCallbackURL)}`;
   try {
     const result = await auth.api.signInSocial({
-      body: { provider: "google", callbackURL: interceptCallbackURL, errorCallbackURL },
+      body: { provider: "google", callbackURL: doneURL, errorCallbackURL },
       headers: new Headers({ "Content-Type": "application/json" }),
       asResponse: true,
     });
-    const setCookie = result.headers.getSetCookie?.() || result.headers.get("set-cookie");
-    if (setCookie) res.setHeader("Set-Cookie", Array.isArray(setCookie) ? setCookie : [setCookie]);
+    // Forward state cookie to browser (first-party — this IS onrender.com).
+    const cookies = result.headers.getSetCookie?.() || [];
+    if (cookies.length) res.setHeader("Set-Cookie", cookies);
     const body = await result.json();
-    const url = body?.url;
-    if (url) return res.redirect(url);
+    if (body?.url) return res.redirect(body.url);
     res.redirect(errorCallbackURL);
   } catch (err) {
     console.error("[oauth/google]", err.message);
@@ -84,29 +80,24 @@ app.get("/api/oauth/google", async (req, res) => {
   }
 });
 
-// After Google redirects back here, BetterAuth has set the session cookie and
-// emitted set-ott header. We forward the OTT to the Vercel frontend so it can
-// exchange it for a session without needing the cross-origin cookie.
-app.get("/api/oauth/google/callback", async (req, res) => {
-  const finalCallbackURL = req.query.finalCallbackURL || config.CLIENT_ORIGIN + "/whiteboards";
-  const errorCallbackURL = req.query.errorCallbackURL || config.CLIENT_ORIGIN + "/login";
-  // Forward to BetterAuth's real callback with all original query params.
-  const { finalCallbackURL: _f, errorCallbackURL: _e, ...rest } = req.query;
-  const params = new URLSearchParams(rest);
+// GET /api/oauth/done — BetterAuth redirects here after completing OAuth.
+// The browser arrives with a valid session cookie on onrender.com.
+// We generate a one-time-token and redirect to Vercel with ?ott= so the
+// frontend can exchange it for a session without needing the cross-origin cookie.
+app.get("/api/oauth/done", async (req, res) => {
+  const to = req.query.to || config.CLIENT_ORIGIN + "/whiteboards";
+  const err = req.query.err || config.CLIENT_ORIGIN + "/login";
   try {
-    const baCallbackURL = `${config.BETTER_AUTH_URL}/api/auth/callback/google?${params}`;
-    const result = await fetch(baCallbackURL, { redirect: "manual" });
-    // Forward cookies (session token).
-    const cookies = result.headers.getSetCookie?.() || [];
-    if (cookies.length) res.setHeader("Set-Cookie", cookies);
-    // Read the one-time-token BetterAuth attached.
-    const ott = result.headers.get("set-ott");
-    const dest = new URL(finalCallbackURL);
+    const headers = new Headers({ cookie: req.headers.cookie || "" });
+    const ottResult = await auth.api.generateOneTimeToken({ headers, asResponse: true });
+    const body = await ottResult.json();
+    const ott = body?.token;
+    const dest = new URL(to);
     if (ott) dest.searchParams.set("ott", ott);
     res.redirect(dest.toString());
-  } catch (err) {
-    console.error("[oauth/google/callback]", err.message);
-    res.redirect(errorCallbackURL);
+  } catch (e) {
+    console.error("[oauth/done]", e.message);
+    res.redirect(err);
   }
 });
 

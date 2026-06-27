@@ -16,6 +16,8 @@ const auth = betterAuth({
     BETTER_AUTH_URL,
     "http://localhost:5173",
     "http://localhost:4000",
+    // /api/oauth/done is on the same server — must be trusted as a callbackURL
+    BETTER_AUTH_URL ? `${BETTER_AUTH_URL}/api/oauth/done` : null,
   ].filter(Boolean).map(u => u.replace(/\/$/, "")),
   advanced: {
     crossSubdomainCookies: { enabled: false },
