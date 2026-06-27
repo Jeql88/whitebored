@@ -5,26 +5,30 @@ import { API_BASE } from "../../api/config";
 import AuthLayout from "./AuthLayout";
 
 function GoogleButton({ label, returnTo = "/whiteboards" }) {
-  const callbackURL = returnTo.startsWith("http")
-    ? returnTo
-    : `${window.location.origin}${returnTo}`;
-  const errorCallbackURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
-  // Submit as a native form POST to the Render server so the browser follows
-  // the redirect to Google natively — no cross-origin fetch, no cookie issues.
-  const action = `${API_BASE}/api/auth/sign-in/social`;
+  const handleGoogle = async () => {
+    const callbackURL = returnTo.startsWith("http")
+      ? returnTo
+      : `${window.location.origin}${returnTo}`;
+    const errorCallbackURL = `${window.location.origin}/login?returnTo=${encodeURIComponent(returnTo)}`;
+    const res = await fetch(`${API_BASE}/api/auth/sign-in/social`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "google", callbackURL, errorCallbackURL }),
+      credentials: "include",
+    });
+    const json = await res.json().catch(() => null);
+    const url = json?.url;
+    if (url) window.location.href = url;
+  };
   return (
-    <form method="POST" action={action}>
-      <input type="hidden" name="provider" value="google" />
-      <input type="hidden" name="callbackURL" value={callbackURL} />
-      <input type="hidden" name="errorCallbackURL" value={errorCallbackURL} />
-      <button
-        type="submit"
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] py-2.5 text-sm font-medium text-[var(--surface-text)] transition-colors hover:bg-[var(--surface-border)]"
-      >
-        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-        {label}
-      </button>
-    </form>
+    <button
+      type="button"
+      onClick={handleGoogle}
+      className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] py-2.5 text-sm font-medium text-[var(--surface-text)] transition-colors hover:bg-[var(--surface-border)]"
+    >
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      {label}
+    </button>
   );
 }
 
