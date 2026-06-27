@@ -48,11 +48,7 @@ const io = new Server(server, {
   pingTimeout: 8000,
 });
 
-// Skip Express CORS for /api/auth/* — BetterAuth's toNodeHandler sets its own headers.
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api/auth/")) return next();
-  cors({ origin: corsOriginFn, credentials: true })(req, res, next);
-});
+app.use(cors({ origin: corsOriginFn, credentials: true }));
 app.use(compression());
 
 // BetterAuth handler must come BEFORE express.json() — it reads the raw body itself.

@@ -18,9 +18,9 @@ services:
       - key: BETTER_AUTH_SECRET
         sync: false
       - key: BETTER_AUTH_URL
-        value: https://whitebored-production.up.railway.app
+        value: https://whitebored.onrender.com
       - key: CLIENT_ORIGIN
-        value: https://whitebored-production.up.railway.app
+        value: https://whitebored-client.vercel.app
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
