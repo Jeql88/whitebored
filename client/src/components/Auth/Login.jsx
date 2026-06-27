@@ -16,7 +16,10 @@ function GoogleButton({ label, returnTo = "/whiteboards" }) {
       body: JSON.stringify({ provider: "google", callbackURL, errorCallbackURL }),
       credentials: "include",
     });
-    const json = await res.json().catch(() => null);
+    const text = await res.text().catch(() => "");
+    console.log("[google-auth] status:", res.status, "body:", text);
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
     const url = json?.url;
     if (url) window.location.href = url;
   };
