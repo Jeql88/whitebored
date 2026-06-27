@@ -21,7 +21,12 @@ function GoogleButton({ label, returnTo = "/whiteboards" }) {
     let json = null;
     try { json = JSON.parse(text); } catch {}
     const url = json?.url;
-    if (url) window.location.href = url;
+    console.log("[google-auth] redirecting to:", url);
+    if (url) {
+      window.location.assign(url);
+    } else {
+      console.error("[google-auth] no url in response", json);
+    }
   };
   return (
     <button
