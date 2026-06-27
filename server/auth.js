@@ -16,7 +16,7 @@ const auth = betterAuth({
     BETTER_AUTH_URL,
     "http://localhost:5173",
     "http://localhost:4000",
-  ].filter(Boolean),
+  ].filter(Boolean).map(u => u.replace(/\/$/, "")),
   advanced: {
     crossSubdomainCookies: { enabled: false },
     useSecureCookies: true,

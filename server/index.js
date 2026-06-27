@@ -24,11 +24,22 @@ const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
 
-// Fall back to localhost in dev; never open wildcard (true) with credentials.
-const corsOrigin = config.CLIENT_ORIGIN || "http://localhost:5173";
+// Build the set of allowed origins. Strip trailing slashes so the cors()
+// exact-match check doesn't fail on "https://foo.com/" vs "https://foo.com".
+const allowedOrigins = [
+  config.CLIENT_ORIGIN,
+  "http://localhost:5173",
+  "http://localhost:4000",
+].filter(Boolean).map(o => o.replace(/\/$/, ""));
+
+function corsOriginFn(origin, callback) {
+  // Same-origin requests (e.g. curl, server-to-server) have no Origin header.
+  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+  callback(new Error(`CORS: origin not allowed — ${origin}`));
+}
 
 const io = new Server(server, {
-  cors: { origin: corsOrigin, credentials: true, methods: ["GET", "POST", "PATCH", "DELETE"] },
+  cors: { origin: corsOriginFn, credentials: true, methods: ["GET", "POST", "PATCH", "DELETE"] },
   maxHttpBufferSize: 1e7, // 10 MB
   // Detect ungraceful disconnects (mobile backgrounding, tab crash) faster so a
   // departed user's presence avatar is reaped within ~18s instead of ~45s when
@@ -37,7 +48,11 @@ const io = new Server(server, {
   pingTimeout: 8000,
 });
 
-app.use(cors({ origin: corsOrigin, credentials: true }));
+// Skip Express CORS for /api/auth/* — BetterAuth's toNodeHandler sets its own headers.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/auth/")) return next();
+  cors({ origin: corsOriginFn, credentials: true })(req, res, next);
+});
 app.use(compression());
 
 // BetterAuth handler must come BEFORE express.json() — it reads the raw body itself.
