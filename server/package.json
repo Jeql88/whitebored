@@ -6,11 +6,13 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --env-file=.env index.js"
+    "dev": "node --env-file=.env index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@better-auth/mongo-adapter": "^1.6.13",
     "@clerk/clerk-sdk-node": "^5.1.6",
+    "@google/genai": "^2.21.0",
     "bcrypt": "^5.1.1",
     "better-auth": "^1.6.13",
     "compression": "^1.8.1",

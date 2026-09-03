@@ -13,6 +13,10 @@ const DB_NAME = process.env.DB_NAME || "whiteboard";
 // Optional: enables handwriting OCR (Google Cloud Vision). If unset, the OCR
 // endpoint degrades gracefully and typed-text search still works.
 const GOOGLE_VISION_KEY = process.env.GOOGLE_VISION_KEY || "";
+// Optional: enables the Sketch-to-Notes AI features (Gemini). If unset, the
+// central Gemini module has no real client and AI features degrade gracefully.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
 function requireVar(name, value) {
   if (!value) {
@@ -38,4 +42,6 @@ module.exports = {
   CLIENT_ORIGIN,
   DB_NAME,
   GOOGLE_VISION_KEY,
+  GEMINI_API_KEY,
+  GEMINI_MODEL,
 };
