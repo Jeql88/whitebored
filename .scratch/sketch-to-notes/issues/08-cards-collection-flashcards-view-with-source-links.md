@@ -1,6 +1,6 @@
 # Cards collection + Flashcards view with source links (D17, D18)
 
-Status: ready-for-agent
+Status: done
 Slice: 8
 
 ## Parent
