@@ -1,6 +1,6 @@
 # Notes artifact — generate, persist, click-to-highlight, streaming (D6, D8, D9)
 
-Status: ready-for-agent
+Status: done
 Slice: 6
 
 ## Parent

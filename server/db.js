@@ -20,6 +20,7 @@ const collections = {
   scenes: null, // one full-scene snapshot per board
   comments: null,
   users: null,
+  notes: null, // one Notes artifact record per board (Sketch-to-Notes, D6)
 };
 
 async function connectDB() {
@@ -35,9 +36,13 @@ async function connectDB() {
   // lookups, the share "People with access" list, and admin user management all
   // resolve accounts through this handle.
   collections.users = db.collection("user");
+  collections.notes = db.collection("notes");
 
   // One snapshot doc per board — enforce + speed up lookups by whiteboardId.
   await collections.scenes.createIndex({ whiteboardId: 1 }, { unique: true });
+
+  // One Notes artifact record per board (D6/story 8) — enforce + speed lookups.
+  await collections.notes.createIndex({ boardId: 1 }, { unique: true });
 
   // Dashboard lists boards by owner OR editor OR collaborator OR visitor.
   await collections.whiteboards.createIndex({ userId: 1 });

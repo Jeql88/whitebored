@@ -4,6 +4,11 @@
 const { socketAuth } = require("../middleware/auth");
 const { registerSceneHandlers, loadScene } = require("./scene");
 const { registerPresenceHandlers, getChatHistory } = require("./presence");
+const { registerNotesHandlers } = require("../notes/socketNotes");
+const { createNotesFromGemini } = require("../notes");
+const { createNotesStore } = require("../notes/store");
+const { createGeminiFromConfig } = require("../gemini");
+const config = require("../config");
 const { canAccessBoard, getBoard, toObjectId } = require("../auth/boards");
 const { getCollections } = require("../db");
 
@@ -14,6 +19,12 @@ const connsByIp = new Map(); // ip -> Set of socket ids
 
 function initSocket(io) {
   io.use(socketAuth);
+
+  // Build the Notes streaming pipeline once (D6/D9). All Gemini access is through
+  // the central module; if no key is configured the generator is null and the
+  // notes handler is simply not registered — the feature degrades gracefully
+  // (mirrors the OCR route's 503 path) rather than crashing collab.
+  const notesGenerator = createNotesFromGemini(createGeminiFromConfig(config));
 
   io.on("connection", (socket) => {
     // Connection cap per IP.
@@ -98,6 +109,18 @@ function initSocket(io) {
 
     registerSceneHandlers(io, socket);
     registerPresenceHandlers(io, socket);
+
+    // Notes streaming (D6/D9) — only when Gemini is configured. The store is built
+    // per-connection so it picks up collections after connectDB resolved; access is
+    // gated through the same canAccessBoard seam the scene handlers use.
+    if (notesGenerator) {
+      const store = createNotesStore({ collection: getCollections().notes });
+      registerNotesHandlers(socket, {
+        generator: notesGenerator,
+        store,
+        canAccess: canAccessBoard,
+      });
+    }
   });
 }
 
