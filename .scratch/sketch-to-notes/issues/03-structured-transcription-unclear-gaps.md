@@ -1,6 +1,6 @@
 # Structured transcription + [unclear] gaps (D3 phase 1, D4)
 
-Status: ready-for-agent
+Status: done
 Slice: 3
 
 ## Parent
