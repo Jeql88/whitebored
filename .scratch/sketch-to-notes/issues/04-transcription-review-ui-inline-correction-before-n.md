@@ -1,6 +1,6 @@
 # Transcription review UI — inline correction before notes (D3)
 
-Status: ready-for-agent
+Status: done
 Slice: 4
 
 ## Parent
