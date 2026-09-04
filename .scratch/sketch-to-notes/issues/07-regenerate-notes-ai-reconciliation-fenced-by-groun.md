@@ -1,6 +1,6 @@
 # Regenerate notes — AI reconciliation fenced by grounding (D7)
 
-Status: ready-for-agent
+Status: done
 Slice: 7
 
 ## Parent
