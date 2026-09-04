@@ -1,6 +1,6 @@
 # Shared "protect-what's-yours" regeneration primitive
 
-Status: ready-for-agent
+Status: done
 Slice: 5
 
 ## Parent
