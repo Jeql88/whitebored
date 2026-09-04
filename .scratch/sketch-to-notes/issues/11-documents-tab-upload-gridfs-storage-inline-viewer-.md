@@ -1,6 +1,6 @@
 # Documents tab — upload, GridFS storage, inline viewer with jump-to-page (D13)
 
-Status: ready-for-agent
+Status: done
 Slice: 11
 
 ## Parent
