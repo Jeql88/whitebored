@@ -16,7 +16,9 @@ const { initSocket } = require("./socket");
 const { auth } = require("./auth");
 const whiteboardRoutes = require("./routes/whiteboards");
 const ocrRoutes = require("./routes/ocr");
+const documentRoutes = require("./routes/documents");
 const adminRoutes = require("./routes/admin");
+const searchRoutes = require("./routes/search");
 
 const app = express();
 // Railway terminates TLS at a proxy; trust it so req.ip reflects the real client
@@ -117,6 +119,8 @@ app.get("/healthz", async (req, res) => {
 app.use("/api/admin", adminRoutes());
 app.use("/api/whiteboards", whiteboardRoutes(io));
 app.use("/api/whiteboards", ocrRoutes());
+app.use("/api/whiteboards", documentRoutes());
+app.use("/api/search", searchRoutes());
 
 // Catch-all error handler — prevents unhandled Express errors from leaking stack traces.
 app.use((err, req, res, next) => {

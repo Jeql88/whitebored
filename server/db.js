@@ -49,8 +49,16 @@ async function connectDB() {
   await collections.whiteboards.createIndex({ editors: 1 });
   await collections.whiteboards.createIndex({ "collaborators.userId": 1 });
   await collections.whiteboards.createIndex({ visitors: 1 });
-  // Content search across board name + extracted text (typed + OCR).
-  await collections.whiteboards.createIndex({ textIndex: "text", name: "text" });
+  // Content search (Sketch-to-Notes D20) across board name + the three extracted-text
+  // fields: transcribed handwriting, typed labels, and generated notes. Replaces the
+  // old flat `textIndex`. The search endpoint (/api/search) does substring matching so
+  // it can report WHICH field matched; this text index still speeds keyword lookups.
+  await collections.whiteboards.createIndex({
+    name: "text",
+    transcriptionText: "text",
+    typedLabelsText: "text",
+    notesText: "text",
+  });
   // Default dashboard sort — without this every list request is a full collection scan.
   await collections.whiteboards.createIndex({ updatedAt: -1 });
   // Comment listing per board.

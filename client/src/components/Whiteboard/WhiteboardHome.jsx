@@ -6,6 +6,7 @@ import {
   getWhiteboards,
   createWhiteboard,
   getActiveBoards,
+  searchBoards,
 } from "../../api/whiteboard";
 import WhiteboardCard from "./WhiteBoardCard.jsx";
 import ThemeToggle from "../ThemeToggle";
@@ -65,22 +66,36 @@ export default function WhiteboardHome() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Search now runs server-side (D20): keyword/substring over board name +
+  // transcription + typed labels + notes, scoped to accessible boards, reporting
+  // which field matched. An empty box shows every loaded board. Debounced; stale
+  // responses are discarded so a slow request can't overwrite a newer one.
   useEffect(() => {
-    const delay = setTimeout(() => {
-      const term = searchTerm.trim().toLowerCase();
-      setFilteredBoards(
-        term === ""
-          ? whiteboards
-          : whiteboards.filter(
-              (wb) =>
-                wb.name.toLowerCase().includes(term) ||
-                (wb.textIndex || "").includes(term)
-            )
-      );
+    const term = searchTerm.trim();
+    if (term === "") {
+      setFilteredBoards(whiteboards);
+      setOwnedVisible(PAGE_SIZE);
+      setSharedVisible(PAGE_SIZE);
+      return;
+    }
+    let alive = true;
+    const delay = setTimeout(async () => {
+      const { results } = await searchBoards(term);
+      if (!alive) return;
+      // Join server hits back to the full loaded board objects (cards need
+      // editors/thumbnail/etc.), attaching matchedFields for the "which source" hint.
+      const matchById = new Map(results.map((r) => [String(r.board._id), r.matchedFields]));
+      const hits = whiteboards
+        .filter((wb) => matchById.has(String(wb._id)))
+        .map((wb) => ({ ...wb, matchedFields: matchById.get(String(wb._id)) }));
+      setFilteredBoards(hits);
       setOwnedVisible(PAGE_SIZE);
       setSharedVisible(PAGE_SIZE);
     }, 400);
-    return () => clearTimeout(delay);
+    return () => {
+      alive = false;
+      clearTimeout(delay);
+    };
   }, [searchTerm, whiteboards]);
 
   useEffect(() => {
@@ -215,7 +230,7 @@ export default function WhiteboardHome() {
             />
             <input
               type="text"
-              placeholder="Search by name or content…"
+              placeholder="Search name, handwriting, labels, notes…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] py-2 pl-9 pr-3 text-sm text-[var(--surface-text)] outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"

@@ -14,6 +14,19 @@ export async function getActiveBoards() {
   };
 }
 
+// Server-side content search (D20): keyword/substring over board name +
+// transcription + typed labels + notes, scoped to boards the user can access.
+// Returns [{ board, matchedFields }] so a result can say which source matched.
+export async function searchBoards(query, { limit } = {}) {
+  const params = new URLSearchParams({ q: query });
+  if (limit) params.set("limit", String(limit));
+  const data = await apiFetch(`/api/search?${params}`);
+  return {
+    query: typeof data.query === "string" ? data.query : "",
+    results: Array.isArray(data.results) ? data.results : [],
+  };
+}
+
 export function createWhiteboard(name) {
   return apiFetch(WB, { method: "POST", body: { name } });
 }

@@ -1,6 +1,6 @@
 # Server search endpoint over three board fields (D20)
 
-Status: ready-for-agent
+Status: done
 Slice: 10
 
 ## Parent
