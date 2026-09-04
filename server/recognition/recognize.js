@@ -1,0 +1,138 @@
+"use strict";
+
+// The reading-only recognize() seam (D5). Given crops (from structure-first
+// grouping), it returns what the board SAYS — nothing more. Notes generation is a
+// separate later step; recognize never writes notes and never touches ink.
+//
+//   recognize(crops) -> [ { cropId, segments: [{ text, uncertain }],
+//                           sourceElementIds, bbox } ]
+//
+// Structure-first routing (D1) is honoured here too:
+//   - kind "text" crops are TYPED-TEXT GROUND TRUTH → transcribed verbatim as a
+//     single certain segment, and NEVER sent to the model (story 2).
+//   - kind "ink" crops are batched into ONE multi-image Gemini request keyed by
+//     crop id (per-crop linking without N round-trips), then parsed back per id.
+//
+// The server owns the Gemini key, the grounding prompt, and the JSON schema — all
+// of it behind this seam (D2), so a browser can never edit the grounding away.
+// The model is reached ONLY through the central Gemini module (slice #1): its
+// per-user throttle, queue, and 429 backoff apply, and a deferred ("working")
+// result is awaited here so recognize still returns a reading rather than failing
+// on a busy moment (story 56).
+//
+// No confidence score is emitted (spec §7 distrusts self-reported confidence;
+// nothing consumes it). Illegible ink surfaces as an `uncertain` segment — a
+// first-class [unclear] gap — never a silent guess, and a crop the model omits is
+// returned as an unclear gap rather than dropped (strokes are never lost, story 7).
+
+// What we ask the model to return, stated in the prompt so the grounding lives
+// server-side. Kept terse; tests assert on the RESULT, never on this string.
+const SCHEMA_INSTRUCTION =
+  "You are transcribing handwriting and diagram labels from images. " +
+  "Each image is tagged with a cropId. Return ONLY JSON: an object mapping each " +
+  'cropId to { "segments": [ { "text": string, "uncertain": boolean } ] }. ' +
+  "Mark a segment uncertain when the ink is illegible; never guess silently. " +
+  "Read only what is drawn; do not invent, summarize, or add anything.";
+
+function unclearSegment() {
+  // A first-class [unclear] gap the user can tap and fix (story 6).
+  return { text: "[unclear]", uncertain: true };
+}
+
+// Normalize the model's per-crop answer into the D5 segment list. Tolerant of a
+// missing/blank answer (→ an [unclear] gap) but strict about the segment shape:
+// a segment must carry text, else it becomes an unclear gap rather than garbage.
+function segmentsFrom(answer) {
+  const segs = answer && Array.isArray(answer.segments) ? answer.segments : null;
+  if (!segs || segs.length === 0) return [unclearSegment()];
+  const cleaned = segs
+    .filter((s) => s && typeof s.text === "string")
+    .map((s) => ({ text: s.text, uncertain: Boolean(s.uncertain) }));
+  return cleaned.length > 0 ? cleaned : [unclearSegment()];
+}
+
+// Pull the JSON text out of a central-module result. The module resolves to
+// { status:"ok", response } now, or { status:"deferred", done } when throttled —
+// in which case we await the working state's completion (story 56).
+async function textOf(result) {
+  const settled = result.status === "deferred" ? await result.done : result;
+  const response = settled.response;
+  // The real client returns the SDK response, whose `.text` is the model output.
+  // Accept a plain string too so the seam isn't coupled to one response wrapper.
+  return typeof response === "string" ? response : response?.text ?? "";
+}
+
+function parseBatch(text) {
+  try {
+    const obj = JSON.parse(text);
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    // A malformed model reply must not crash recognition — every crop simply
+    // reads back as an [unclear] gap (degrade gracefully on the foreseen).
+    return {};
+  }
+}
+
+// Build the one multi-image request. Each ink crop contributes its cropId tag and
+// its normalized image (a data URL the client already attached). The exact
+// contents wiring is an internal detail; tests assert the crop ids are present
+// and that it is a single call.
+function buildRequest(userId, inkCrops) {
+  const parts = [{ text: SCHEMA_INSTRUCTION }];
+  for (const crop of inkCrops) {
+    parts.push({ text: `cropId: ${crop.cropId}` });
+    parts.push({ image: crop.image });
+  }
+  return {
+    userId,
+    contents: [{ role: "user", parts }],
+    config: { responseMimeType: "application/json" },
+  };
+}
+
+// Create the recognizer bound to a central Gemini module and the requesting user
+// (the module throttles per user). `userId` may be supplied per-call instead.
+function createRecognizer({ gemini, userId: defaultUserId } = {}) {
+  if (!gemini || typeof gemini.generate !== "function") {
+    throw new Error("createRecognizer: a central Gemini module is required");
+  }
+
+  async function recognize(crops = [], { userId = defaultUserId } = {}) {
+    if (!Array.isArray(crops) || crops.length === 0) return [];
+
+    const textCrops = crops.filter((c) => c.kind === "text");
+    const inkCrops = crops.filter((c) => c.kind !== "text");
+
+    // Typed text is ground truth: verbatim single certain segment, no model call.
+    const readings = new Map();
+    for (const crop of textCrops) {
+      readings.set(crop.cropId, {
+        cropId: crop.cropId,
+        segments: [{ text: String(crop.text ?? ""), uncertain: false }],
+        sourceElementIds: crop.sourceElementIds,
+        bbox: crop.bbox,
+      });
+    }
+
+    // Ink crops → ONE batched, per-crop-keyed request through the central module.
+    if (inkCrops.length > 0) {
+      const result = await gemini.generate(buildRequest(userId, inkCrops));
+      const byCropId = parseBatch(await textOf(result));
+      for (const crop of inkCrops) {
+        readings.set(crop.cropId, {
+          cropId: crop.cropId,
+          segments: segmentsFrom(byCropId[crop.cropId]),
+          sourceElementIds: crop.sourceElementIds,
+          bbox: crop.bbox,
+        });
+      }
+    }
+
+    // Preserve caller order so downstream (transcription review) is stable.
+    return crops.map((c) => readings.get(c.cropId));
+  }
+
+  return { recognize };
+}
+
+module.exports = { createRecognizer, SCHEMA_INSTRUCTION };

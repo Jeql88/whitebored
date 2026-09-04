@@ -1,6 +1,6 @@
 # recognize() seam — Gemini swap, structure-first crop grouping (D1, D2, D5)
 
-Status: ready-for-agent
+Status: done
 Slice: 2
 
 ## Parent
