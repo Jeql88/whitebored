@@ -1,6 +1,6 @@
 # Add to notes from chat with provenance preserved (D11, D12)
 
-Status: ready-for-agent
+Status: done
 Slice: 14
 
 ## Parent

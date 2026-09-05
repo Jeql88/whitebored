@@ -1,5 +1,7 @@
 "use strict";
 
+const { lineFromChatMessage } = require("./fromChat");
+
 // The streaming seam (D9): notes stream line-by-line over the EXISTING Socket.IO
 // channel. This wires the notes generator to a socket without the generator or its
 // tests ever knowing about Socket.IO — the socket is the seam, driven in tests with
@@ -10,6 +12,7 @@
 //
 // It listens for one client event and emits three:
 //   in:  "generateNotes"  { boardId, transcription, noteType }
+//   in:  "addChatToNotes" { boardId, text, bucket, sourceElementIds, citation }
 //   out: "notesLine"      { boardId, line }     one per VERIFIED line, as ready
 //        "notesDone"      { boardId, record }   the persisted record, when complete
 //        "notesError"     { boardId, error }    on an unexpected failure
@@ -75,6 +78,54 @@ function registerNotesHandlers(socket, { generator, store, canAccess } = {}) {
       // client rather than leaving it spinning.
       console.error("[notes] generation failed:", err.message);
       socket.emit("notesError", { boardId, error: "generation_failed" });
+    }
+  });
+
+  // Move a verified AI-chat answer into the notes artifact (slice #14, D11/D12).
+  // The client mirrors this rule so it never offers an un-addable move, but the
+  // server re-checks provenance here rather than trusting the emit: general
+  // knowledge must never be laundered into the artifact (story 19).
+  socket.on("addChatToNotes", async (payload = {}) => {
+    const { boardId, text, bucket, sourceElementIds, citation } = payload;
+    if (!boardId) return;
+
+    if (typeof canAccess === "function") {
+      const ok = await canAccess(socket.user, boardId).catch(() => false);
+      const allowed = ok === true || (ok && ok.allowed === true);
+      if (!allowed) {
+        socket.emit("notesError", { boardId, error: "forbidden" });
+        return;
+      }
+    }
+
+    // Rebuild the chat message shape the provenance rule is written against, so
+    // one module decides addability for both the socket and the generator paths.
+    const line = lineFromChatMessage({
+      role: "assistant",
+      text,
+      source: {
+        bucket,
+        addableToNotes: bucket === "board" || bucket === "document",
+        sourceElementIds,
+        docId: citation?.docId,
+        page: citation?.page,
+      },
+    });
+    if (!line) return; // not addable — refuse silently, the UI offered nothing
+
+    if (!store || typeof store.load !== "function") return;
+
+    try {
+      const record = (await store.load(boardId)) || { boardId, lines: [] };
+      const lines = Array.isArray(record.lines) ? record.lines : [];
+      const updated = { ...record, boardId, lines: [...lines, line] };
+
+      await store.save(updated);
+      // Hand back the whole artifact so the panel re-renders with the new line.
+      socket.emit("notesDone", { boardId, record: updated });
+    } catch (err) {
+      console.error("[notes] add-from-chat failed:", err.message);
+      socket.emit("notesError", { boardId, error: "add_failed" });
     }
   });
 }

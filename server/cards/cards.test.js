@@ -388,3 +388,38 @@ test("store.load returns null for a board with no cards yet", async () => {
   const store = createCardsStore({ collection: fakeCollection() });
   assert.equal(await store.load("nope"), null);
 });
+
+// --- D12: the notes-only deck stays shapes-only (slice #14) -------------------
+
+test("a document-origin line added from chat never sources a notes-deck card (D12)", () => {
+  // Same board, two lines: one from the board, one moved in from a document-sourced
+  // chat answer. The document line is legitimately in the ARTIFACT, but the
+  // notes-only deck is shapes-only, so its text must not become card-verifiable.
+  const record = {
+    boardId: "b1",
+    lines: [
+      { text: "Approval is the first step", kind: "key-point", sourceElementIds: ["f0"], origin: "board" },
+      {
+        text: "Photosynthesis converts light to sugar",
+        kind: "key-point",
+        sourceElementIds: [],
+        origin: "document",
+        citation: { docId: "d1", page: 4 },
+      },
+    ],
+  };
+
+  const source = cardSourceText(record);
+
+  // The board line still verifies a card drawn from it...
+  assert.equal(
+    verifyCard({ answer: "Approval is the first step", sourceElementIds: ["f0"] }, source),
+    true
+  );
+  // ...but a card drawn from the document line is un-traceable to ink and is
+  // dropped, because that line was filtered out of the deck corpus entirely.
+  assert.equal(
+    verifyCard({ answer: "Photosynthesis converts light to sugar", sourceElementIds: ["f0"] }, source),
+    false
+  );
+});

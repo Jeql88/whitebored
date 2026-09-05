@@ -36,6 +36,7 @@ import { getColorForName, getInitials } from "../../utils/userColor";
 import CommentsSidebar from "./CommentsSidebar";
 import ChatBox from "../Chatbox";
 import ChatPanel from "./ChatPanel";
+import { addToNotesPayload } from "../../utils/addToNotes";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
 import SharePanel from "./SharePanel";
@@ -469,6 +470,22 @@ export default function WhiteboardEditor() {
     [whiteboardId]
   );
 
+  // Move a chat answer into the notes artifact (slice #14, D11/D12). The payload
+  // carries the answer's provenance so the stored line keeps it: a board answer
+  // becomes a chat-origin line with its shapes, a document answer an
+  // origin=document line with its citation. General knowledge never reaches here
+  // — ChatPanel shows no button for it and the helper refuses it anyway (story 19).
+  const addAiAnswerToNotes = useCallback(
+    (message) => {
+      const payload = addToNotesPayload(message);
+      if (!payload) return;
+      const s = socketRef.current;
+      if (!s) return;
+      s.emit("addChatToNotes", { boardId: whiteboardId, ...payload });
+    },
+    [whiteboardId]
+  );
+
   const commitName = async () => {
     if (isGuest) return;
     try {
@@ -890,6 +907,7 @@ export default function WhiteboardEditor() {
               messages={aiChat}
               pending={aiPending}
               onSend={sendAiChat}
+              onAddToNotes={addAiAnswerToNotes}
               onClose={() => setOpenPanel(null)}
             />
           </div>

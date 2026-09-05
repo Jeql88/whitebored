@@ -424,3 +424,77 @@ test("socket seam ignores a generateNotes with no boardId", async () => {
   assert.equal(stub.calls.length, 0);
   assert.equal(socket.emitted.length, 0);
 });
+
+// --- slice #14: moving a chat answer into the notes artifact (D11, D12) -------
+
+test("addChatToNotes appends a board answer as a chat-origin line and persists it", async () => {
+  const saved = [];
+  const store = {
+    load: async () => ({ boardId: "b1", noteType: "lecture", lines: [] }),
+    save: async (r) => { saved.push(r); return r; },
+  };
+  const socket = fakeSocket();
+  registerNotesHandlers(socket, { generator: { generate: async () => ({ boardId: 'b1', lines: [] }) }, store });
+
+  await socket.fire("addChatToNotes", {
+    boardId: "b1",
+    text: "Mitosis has four phases",
+    bucket: "board",
+    sourceElementIds: ["s1"],
+    citation: null,
+  });
+
+  assert.equal(saved.length, 1);
+  const line = saved[0].lines.at(-1);
+  assert.equal(line.text, "Mitosis has four phases");
+  assert.equal(line.origin, "chat");
+  assert.deepEqual(line.sourceElementIds, ["s1"]);
+
+  // The client is told the artifact changed so the panel re-renders.
+  const done = socket.emitted.find((e) => e.event === "notesDone");
+  assert.ok(done, "expected notesDone after the line was added");
+});
+
+test("addChatToNotes stores a document answer as origin=document with its citation", async () => {
+  const saved = [];
+  const store = {
+    load: async () => ({ boardId: "b1", noteType: "lecture", lines: [] }),
+    save: async (r) => { saved.push(r); return r; },
+  };
+  const socket = fakeSocket();
+  registerNotesHandlers(socket, { generator: { generate: async () => ({ boardId: 'b1', lines: [] }) }, store });
+
+  await socket.fire("addChatToNotes", {
+    boardId: "b1",
+    text: "Photosynthesis converts light to sugar",
+    bucket: "document",
+    sourceElementIds: [],
+    citation: { docId: "d1", page: 4 },
+  });
+
+  const line = saved[0].lines.at(-1);
+  assert.equal(line.origin, "document");
+  assert.deepEqual(line.citation, { docId: "d1", page: 4 });
+  assert.deepEqual(line.sourceElementIds, []);
+});
+
+test("addChatToNotes refuses a general-knowledge answer — nothing is persisted (story 19)", async () => {
+  const saved = [];
+  const store = {
+    load: async () => ({ boardId: "b1", noteType: "lecture", lines: [] }),
+    save: async (r) => { saved.push(r); return r; },
+  };
+  const socket = fakeSocket();
+  registerNotesHandlers(socket, { generator: { generate: async () => ({ boardId: 'b1', lines: [] }) }, store });
+
+  await socket.fire("addChatToNotes", {
+    boardId: "b1",
+    text: "The Battle of Hastings was in 1066",
+    bucket: "general",
+    sourceElementIds: [],
+    citation: null,
+  });
+
+  // The server re-checks provenance rather than trusting the client's emit.
+  assert.deepEqual(saved, []);
+});

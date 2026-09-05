@@ -21,15 +21,20 @@
 // "un-traceable card" the acceptance criteria require to be removed.
 
 const { keyTerms, tokenize } = require("../notes/verify");
+const { notesDeckLines } = require("../notes/fromChat");
 
 // Flatten a notes record into one lowercase token haystack — the corpus a card's
 // question is verified against. Accepts the D6 notes record ({ lines: [{ text }] })
 // or a plain string, so the verifier isn't coupled to one wrapper (mirrors
 // notes/verify.js's transcriptionText tolerance).
+//
+// Only the notes-only DECK lines feed this corpus (D12): a document-origin line
+// added from chat lives in the artifact but points at a page rather than at ink,
+// and this deck stays shapes-only so every card can be highlighted back to the
+// board. Filtering here means a document line can never source a notes card.
 function cardSourceText(notes) {
   if (typeof notes === "string") return notes;
-  const lines = notes && Array.isArray(notes.lines) ? notes.lines : [];
-  return lines
+  return notesDeckLines(notes)
     .map((l) => (l && typeof l.text === "string" ? l.text : ""))
     .join(" ");
 }
