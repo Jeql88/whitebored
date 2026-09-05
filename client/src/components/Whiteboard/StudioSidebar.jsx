@@ -117,10 +117,10 @@ export default function StudioSidebar({
       className={
         isSheet
           ? "fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col border-l border-[var(--surface-border)] bg-[var(--surface-card)] shadow-xl"
-          : "flex h-full w-96 flex-col border-l border-[var(--surface-border)] bg-[var(--surface-card)]"
+          : "flex h-full w-96 shrink-0 flex-col overflow-hidden border-l border-[var(--surface-border)] bg-[var(--surface-card)]"
       }
     >
-      <header className="flex items-center justify-between border-b border-[var(--surface-border)] px-3 py-2">
+      <header className="flex shrink-0 items-center justify-between border-b border-[var(--surface-border)] px-3 py-2">
         <h2
           ref={headingRef}
           tabIndex={-1}
@@ -140,7 +140,7 @@ export default function StudioSidebar({
         )}
       </header>
 
-      <div role="tablist" aria-label="Study tools" className="flex border-b border-[var(--surface-border)]">
+      <div role="tablist" aria-label="Study tools" className="flex shrink-0 border-b border-[var(--surface-border)]">
         {TABS.map((tab) => {
           const { id, label } = tab;
           const TabIcon = tab.Icon;
@@ -210,7 +210,7 @@ export default function StudioSidebar({
 
             {(transcriptConfirmed || notesLines.length > 0) && (
               <NotesPanel
-                variant="docked"
+                variant="embedded"
                 noteType={noteType}
                 onNoteTypeChange={onNoteTypeChange}
                 onGenerate={onGenerateNotes}
@@ -230,7 +230,7 @@ export default function StudioSidebar({
         )}
         {activeTab === "chat" && (
           <ChatPanel
-            variant="docked"
+            variant="embedded"
             messages={messages}
             pending={chatPending}
             onSend={onSendChat}
@@ -239,7 +239,7 @@ export default function StudioSidebar({
         )}
         {activeTab === "documents" && (
           <DocumentsPanel
-            variant="docked"
+            variant="embedded"
             documents={documents}
             activeDoc={activeDoc}
             activePage={activePage}
@@ -263,7 +263,7 @@ export default function StudioSidebar({
               </button>
             </div>
             <FactCheckPanel
-            variant="docked"
+            variant="embedded"
             flags={flags}
             onAccept={onAcceptFlag}
             onDismiss={onDismissFlag}
@@ -285,7 +285,7 @@ export default function StudioSidebar({
                 Check coverage against a document
               </button>
             </div>
-            <CoveragePanel variant="docked" report={coverageReport} onCitationClick={onCitationClick} />
+            <CoveragePanel variant="embedded" report={coverageReport} onCitationClick={onCitationClick} />
           </>
         )}
       </div>

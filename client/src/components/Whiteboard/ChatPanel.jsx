@@ -68,6 +68,9 @@ export default function ChatPanel({
   const [input, setInput] = useState("");
   const endRef = useRef(null);
   const isSheet = variant === "sheet";
+  // "embedded" = rendered inside another panel's chrome (the study sidebar), so
+  // this panel contributes CONTENT only: full width, no border, no own surface.
+  const isEmbedded = variant === "embedded";
 
   useEffect(() => {
     // Guard the call itself, not just the ref — jsdom (tests) has no scrollIntoView.
@@ -89,7 +92,9 @@ export default function ChatPanel({
       className={
         isSheet
           ? "fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col border-l border-[var(--surface-border)] bg-[var(--surface-card)] shadow-xl"
-          : "flex h-full w-80 flex-col border-l border-[var(--surface-border)] bg-[var(--surface-card)]"
+          : isEmbedded
+            ? "flex h-full w-full flex-col bg-transparent"
+            : "flex h-full w-80 flex-col border-l border-[var(--surface-border)] bg-[var(--surface-card)]"
       }
     >
       <header className="flex items-center justify-between border-b border-[var(--surface-border)] px-4 py-2.5">
@@ -197,6 +202,6 @@ ChatPanel.propTypes = {
   onSend: PropTypes.func,
   onAddToNotes: PropTypes.func,
   pending: PropTypes.bool,
-  variant: PropTypes.oneOf(["docked", "sheet"]),
+  variant: PropTypes.oneOf(["docked", "sheet", "embedded"]),
   onClose: PropTypes.func,
 };

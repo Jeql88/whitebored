@@ -73,12 +73,17 @@ export default function FactCheckPanel({
   onClose,
 }) {
   const isSheet = variant === "sheet";
+  // "embedded" = rendered inside another panel's chrome (the study sidebar), so
+  // this panel contributes CONTENT only: full width, no border, no own surface.
+  const isEmbedded = variant === "embedded";
   // Only open flags are surfaced — a judged flag stays judged (story 29).
   const openFlags = flags.filter((f) => f && f.status === "open");
 
   const chrome = isSheet
     ? "fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col gap-4 border-l border-[var(--surface-border)] bg-[var(--surface-card)] p-4 shadow-xl"
-    : "flex h-full w-80 flex-col gap-4 border-l border-[var(--surface-border)] bg-[var(--surface-card)] p-4";
+    : isEmbedded
+            ? "flex h-full w-full flex-col gap-4 bg-transparent p-4"
+            : "flex h-full w-80 flex-col gap-4 border-l border-[var(--surface-border)] bg-[var(--surface-card)] p-4";
 
   return (
     <aside aria-label="Fact-check" data-variant={variant} className={chrome}>
@@ -203,6 +208,6 @@ FactCheckPanel.propTypes = {
   }),
   onConfirmEdit: PropTypes.func,
   onDeclineEdit: PropTypes.func,
-  variant: PropTypes.oneOf(["docked", "sheet"]),
+  variant: PropTypes.oneOf(["docked", "sheet", "embedded"]),
   onClose: PropTypes.func,
 };

@@ -852,6 +852,17 @@ export default function WhiteboardEditor() {
     }
   };
 
+  // Excalidraw caches its canvas size, so when the docked sidebar opens or closes
+  // the container changes width but the canvas does not — leaving pointer input
+  // offset from the cursor. refresh() makes it re-measure. Deferred a frame so it
+  // runs after the flex row has actually reflowed.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return undefined;
+    const id = requestAnimationFrame(() => api.refresh());
+    return () => cancelAnimationFrame(id);
+  }, [openPanel, isNarrow]);
+
   // The study route links back as /whiteboard/:id?highlight=id1,id2 when the user
   // asks to see a card on the board (story 36). Consume it once the scene has
   // elements, then strip it from the URL so a refresh does not re-trigger.
@@ -1277,8 +1288,11 @@ export default function WhiteboardEditor() {
         {!isGuest && <UserMenu />}
       </header>
 
-      {/* Canvas */}
-      <div className="relative flex-1">
+      {/* Canvas + docked tool column. A flex ROW so the docked sidebar is a real
+          sibling and the canvas reflows around it, rather than the sidebar
+          landing below the canvas in normal flow. */}
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-w-0 flex-1">
         {disconnected && (
           <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full bg-amber-500/95 px-3 py-1 text-xs font-medium text-white shadow-lg">
             Reconnecting…
@@ -1352,6 +1366,8 @@ export default function WhiteboardEditor() {
         </Excalidraw>
 
         <Minimap apiRef={apiRef} />
+
+        </div>
 
         {openPanel === "comments" && (
           <CommentsSidebar

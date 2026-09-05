@@ -52,6 +52,9 @@ export default function NotesPanel({
   onClose,
 }) {
   const isSheet = variant === "sheet";
+  // "embedded" = rendered inside another panel's chrome (the study sidebar), so
+  // this panel contributes CONTENT only: full width, no border, no own surface.
+  const isEmbedded = variant === "embedded";
 
   return (
     <aside
@@ -64,7 +67,9 @@ export default function NotesPanel({
             "fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col gap-4 border-l border-[var(--surface-border)] bg-[var(--surface-card)] p-4 shadow-xl"
           : // Docked right column on wide screens (D22/story 55): the caller reflows
             // the canvas to make room.
-            "flex h-full w-80 flex-col gap-4 border-l border-[var(--surface-border)] bg-[var(--surface-card)] p-4"
+            isEmbedded
+            ? "flex h-full w-full flex-col gap-4 bg-transparent p-4"
+            : "flex h-full w-80 flex-col gap-4 border-l border-[var(--surface-border)] bg-[var(--surface-card)] p-4"
       }
     >
       <header className="flex items-center justify-between">
@@ -179,6 +184,6 @@ NotesPanel.propTypes = {
   ),
   generating: PropTypes.bool,
   onHighlight: PropTypes.func,
-  variant: PropTypes.oneOf(["docked", "sheet"]),
+  variant: PropTypes.oneOf(["docked", "sheet", "embedded"]),
   onClose: PropTypes.func,
 };

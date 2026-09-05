@@ -145,3 +145,25 @@ describe("StudioSidebar — transcription gate", () => {
     expect(onTranscribe).toHaveBeenCalled();
   });
 });
+
+// The panels were written to stand alone: in "docked" mode each carries its own
+// w-80 width and left border. Nested inside the sidebar that produced a fixed,
+// under-wide child with a spurious inner border. They render "embedded" here —
+// content only — so the sidebar owns the frame.
+describe("StudioSidebar — embedded panel chrome", () => {
+  it("renders its panels without their own width or border", () => {
+    renderSidebar({ activeTab: "chat" });
+
+    const panel = screen.getByRole("complementary", { name: /ai chat/i });
+    expect(panel).toHaveAttribute("data-variant", "embedded");
+    // The sidebar sets the width; a nested w-80 would under-fill it.
+    expect(panel.className).not.toMatch(/\bw-80\b/);
+    expect(panel.className).not.toMatch(/\bborder-l\b/);
+    expect(panel.className).toMatch(/\bw-full\b/);
+  });
+
+  it("still gives each panel its own accessible name, so the tools stay distinguishable", () => {
+    renderSidebar({ activeTab: "documents" });
+    expect(screen.getByRole("complementary", { name: /documents/i })).toBeInTheDocument();
+  });
+});
