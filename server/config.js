@@ -15,7 +15,14 @@ const DB_NAME = process.env.DB_NAME || "whiteboard";
 const GOOGLE_VISION_KEY = process.env.GOOGLE_VISION_KEY || "";
 // Optional: enables the Sketch-to-Notes AI features (Gemini). If unset, the
 // central Gemini module has no real client and AI features degrade gracefully.
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+// The Gemini key, accepted under either name. GEMINI_API_KEY is the intended one,
+// but a deployment can end up where that specific variable never reaches the
+// process while GOOGLE_*-prefixed ones do (observed on Render: the dashboard row
+// showed a value, yet the running process had no GEMINI_* variables at all while
+// GOOGLE_VISION_KEY arrived fine). GOOGLE_GEMINI_KEY is a working alias for that
+// case — set whichever one your host actually delivers.
+const GEMINI_API_KEY =
+  process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 // Retrieval embeddings (D14). Read here so the deployed value actually reaches
 // the client seam; realClient falls back to its own default when this is empty.

@@ -140,7 +140,7 @@ app.get("/healthz/config", (req, res) => {
     // dashboard shows a row but this list omits it, the value was never saved —
     // which distinguishes a dashboard problem from an application one.
     geminiEnvVarsPresent: Object.keys(process.env)
-      .filter((k) => k.startsWith("GEMINI"))
+      .filter((k) => k.startsWith("GEMINI") || k.startsWith("GOOGLE"))
       .map((k) => `${k}:${(process.env[k] || "").length}`),
   });
 });
