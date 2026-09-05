@@ -21,6 +21,8 @@ const collections = {
   comments: null,
   users: null,
   notes: null, // one Notes artifact record per board (Sketch-to-Notes, D6)
+  cards: null, // one card deck per (board, deck) — notes vs document (D17/D18)
+  scope: null, // one persisted study scope per board (D19)
   spaces: null, // group-study Space entity (Sketch-to-Notes, D21) — members + boards
 };
 
@@ -38,6 +40,8 @@ async function connectDB() {
   // resolve accounts through this handle.
   collections.users = db.collection("user");
   collections.notes = db.collection("notes");
+  collections.cards = db.collection("cards");
+  collections.scope = db.collection("scope");
   // Group-study Spaces (D21). A Space has members and gathers boards that carry its id.
   collections.spaces = db.collection("spaces");
 
@@ -46,6 +50,10 @@ async function connectDB() {
 
   // One Notes artifact record per board (D6/story 8) — enforce + speed lookups.
   await collections.notes.createIndex({ boardId: 1 }, { unique: true });
+  // A board has one deck per source (notes / document); they are never merged.
+  await collections.cards.createIndex({ boardId: 1, deck: 1 }, { unique: true });
+  // One current study scope per board, so the bar restores what the user left.
+  await collections.scope.createIndex({ boardId: 1 }, { unique: true });
 
   // Dashboard lists boards by owner OR editor OR collaborator OR visitor.
   await collections.whiteboards.createIndex({ userId: 1 });
@@ -56,12 +64,29 @@ async function connectDB() {
   // fields: transcribed handwriting, typed labels, and generated notes. Replaces the
   // old flat `textIndex`. The search endpoint (/api/search) does substring matching so
   // it can report WHICH field matched; this text index still speeds keyword lookups.
-  await collections.whiteboards.createIndex({
+  //
+  // MongoDB allows only ONE text index per collection and refuses to redefine it,
+  // so an existing board database still carrying the old `textIndex` shape would
+  // fail startup here. Drop the superseded index first — dropping is safe and
+  // idempotent (it is rebuilt on the next line), and doing it in place means an
+  // existing deployment upgrades without a manual migration step.
+  const TEXT_INDEX = {
     name: "text",
     transcriptionText: "text",
     typedLabelsText: "text",
     notesText: "text",
-  });
+  };
+  try {
+    await collections.whiteboards.createIndex(TEXT_INDEX);
+  } catch (err) {
+    // IndexOptionsConflict (85) / IndexKeySpecsConflict (86): a different text
+    // index already exists. Anything else is unexpected and must not be masked.
+    if (err.code !== 85 && err.code !== 86) throw err;
+    const existing = await collections.whiteboards.indexes();
+    const stale = existing.find((i) => i.key && i.key._fts === "text");
+    if (stale) await collections.whiteboards.dropIndex(stale.name);
+    await collections.whiteboards.createIndex(TEXT_INDEX);
+  }
   // Default dashboard sort — without this every list request is a full collection scan.
   await collections.whiteboards.createIndex({ updatedAt: -1 });
   // Space membership grants visibility/search of boards carrying a spaceId (D21). This

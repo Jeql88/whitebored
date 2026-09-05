@@ -22,6 +22,8 @@ import {
   Grid3x3,
   FileImage,
   FileText,
+  NotebookPen,
+  GraduationCap,
   Trash2,
   Maximize,
   ScanText,
@@ -30,13 +32,27 @@ import {
 } from "lucide-react";
 
 import { SOCKET_BASE } from "../../api/config";
-import { updateWhiteboard, saveThumbnail, extractText, updateShareSettings, getCollaborators } from "../../api/whiteboard";
+import {
+  updateWhiteboard,
+  saveThumbnail,
+  extractText,
+  updateShareSettings,
+  getCollaborators,
+  getBoardDocuments,
+  getBoardDocument,
+  uploadBoardDocument,
+  deleteBoardDocument,
+  boardDocumentRawUrl,
+} from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
 import CommentsSidebar from "./CommentsSidebar";
 import ChatBox from "../Chatbox";
 import ChatPanel from "./ChatPanel";
 import { addToNotesPayload } from "../../utils/addToNotes";
+import NotesPanel from "./NotesPanel";
+import DocumentsPanel from "./DocumentsPanel";
+import { appendLine } from "../../utils/notesArtifact";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
 import SharePanel from "./SharePanel";
@@ -75,6 +91,18 @@ export default function WhiteboardEditor() {
   const [collaborators, setCollaborators] = useState([]); // presence avatars
   const [openPanel, setOpenPanel] = useState(null); // 'comments' | 'room' | 'aichat' | null
   const [aiChat, setAiChat] = useState([]); // AI "Chat" tab transcript (slice #13)
+
+  // Sketch-to-Notes pipeline state. The transcription is the OCR text the user has
+  // reviewed; notes stream in line-by-line over the socket and are the artifact the
+  // rest of the pipeline (cards, coverage, fact-check) reads.
+  const [notesLines, setNotesLines] = useState([]);
+  const [noteType, setNoteType] = useState("lecture");
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [transcription, setTranscription] = useState("");
+  const [documents, setDocuments] = useState([]);
+  const [activeDoc, setActiveDoc] = useState(null);
+  const [activePage, setActivePage] = useState(1);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
   const [aiPending, setAiPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [socket, setSocket] = useState(null);
@@ -470,6 +498,63 @@ export default function WhiteboardEditor() {
     [whiteboardId]
   );
 
+  // Notes stream in line-by-line (D9): each line has already passed the server's
+  // local key-terms check, so nothing here flickers or gets retracted. notesDone
+  // carries the persisted record, which is also what a reload restores from.
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    const onLine = ({ boardId, line }) => {
+      if (boardId !== whiteboardId) return;
+      setNotesLines((prev) => appendLine(prev, line));
+    };
+    const onDone = ({ boardId, record }) => {
+      if (boardId !== whiteboardId) return;
+      setNotesLines(record?.lines || []);
+      setNotesBusy(false);
+    };
+    const onErr = ({ boardId }) => {
+      if (boardId !== whiteboardId) return;
+      setNotesBusy(false);
+      showToast("Couldn't generate notes. Try again.");
+    };
+
+    socket.on("notesLine", onLine);
+    socket.on("notesDone", onDone);
+    socket.on("notesError", onErr);
+    return () => {
+      socket.off("notesLine", onLine);
+      socket.off("notesDone", onDone);
+      socket.off("notesError", onErr);
+    };
+  }, [whiteboardId]);
+
+  // Generate notes from the reviewed transcription. Phase 2 runs only on text the
+  // user has seen (D3), so we require a transcription rather than silently OCRing.
+  const generateNotes = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    if (!transcription.trim()) {
+      return showToast("Extract text from the board first, then generate notes.");
+    }
+    setNotesLines([]);
+    setNotesBusy(true);
+    socket.emit("generateNotes", { boardId: whiteboardId, transcription, noteType });
+  }, [whiteboardId, transcription, noteType]);
+
+  // Click a note line → highlight the shapes it came from (story 9). The editor
+  // already scrolls-to-content elsewhere; this reuses the same Excalidraw API.
+  const highlightSources = useCallback((sourceElementIds) => {
+    const api = apiRef.current;
+    if (!api || !sourceElementIds?.length) return;
+    const ids = new Set(sourceElementIds);
+    const targets = api.getSceneElements().filter((el) => ids.has(el.id));
+    if (!targets.length) return showToast("Those shapes are no longer on the board.");
+    api.scrollToContent(targets, { fitToContent: true, animate: true });
+    api.updateScene({ appState: { selectedElementIds: Object.fromEntries([...ids].map((id) => [id, true])) } });
+  }, []);
+
   // Move a chat answer into the notes artifact (slice #14, D11/D12). The payload
   // carries the answer's provenance so the stored line keeps it: a board answer
   // becomes a chat-origin line with its shapes, a document answer an
@@ -637,10 +722,88 @@ export default function WhiteboardEditor() {
       if (result.error) return showToast(result.error);
       if (!result.words) return showToast("No text detected.");
       setOcrResult(result.text);
+      // The extracted text is Phase 1's transcription: notes generate only from
+      // text the user has seen (D3), so we hold it here for the Notes panel.
+      setTranscription(result.text);
     } catch {
       showToast("Couldn't extract text. Try again.");
     }
   };
+
+  // --- Documents (D13) ------------------------------------------------------
+
+  const refreshDocuments = useCallback(async () => {
+    try {
+      setDocuments(await getBoardDocuments(whiteboardId));
+    } catch {
+      showToast("Couldn't load documents.");
+    }
+  }, [whiteboardId]);
+
+  const openDocument = useCallback(
+    async (docId) => {
+      try {
+        const doc = await getBoardDocument(whiteboardId, docId);
+        setActiveDoc(doc);
+        setActivePage(1);
+      } catch {
+        showToast("Couldn't open that document.");
+      }
+    },
+    [whiteboardId]
+  );
+
+  // Upload a file. A PDF's per-page text is extracted in the BROWSER (D13 — the
+  // server has no PDF infra); other kinds send their bytes and let the server
+  // normalize. A PDF with no selectable text is refused by the server with a 422.
+  const uploadDocument = useCallback(
+    async (file) => {
+      if (!file) return;
+      setUploadingDoc(true);
+      try {
+        const data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        });
+
+        const kind = file.type === "application/pdf" ? "pdf" : file.type.startsWith("image/") ? "image" : "text";
+        // Per-page PDF text extraction needs a browser PDF library (pdfjs), which
+        // this app does not ship yet — so a PDF has no text layer to send and the
+        // server will refuse it with a clear 422 rather than storing something the
+        // retrieval/coverage features can't read. Text and image files work fully.
+        if (kind === "pdf") {
+          return showToast("PDF text extraction isn't available yet — upload a .txt or an image for now.");
+        }
+        const body = { kind, filename: file.name, contentType: file.type, data };
+        if (kind === "text") body.text = await file.text();
+
+        const summary = await uploadBoardDocument(whiteboardId, body);
+        if (summary?.error) return showToast(summary.error);
+        await refreshDocuments();
+        showToast(`Added ${file.name}.`);
+      } catch {
+        showToast("Couldn't upload that file.");
+      } finally {
+        setUploadingDoc(false);
+      }
+    },
+    [whiteboardId, refreshDocuments]
+  );
+
+  const removeDocument = useCallback(
+    async (docId) => {
+      try {
+        await deleteBoardDocument(whiteboardId, docId);
+        if (activeDoc && activeDoc.docId === docId) setActiveDoc(null);
+        await refreshDocuments();
+      } catch {
+        showToast("Couldn't delete that document.");
+      }
+    },
+    [whiteboardId, activeDoc, refreshDocuments]
+  );
 
   const sharePanelRef = useRef(null);
 
@@ -765,6 +928,23 @@ export default function WhiteboardEditor() {
         </button>
         <button onClick={() => setOpenPanel(openPanel === "aichat" ? null : "aichat")} className={btn} title="Chat">
           <Sparkles size={18} />
+        </button>
+        <button onClick={() => setOpenPanel(openPanel === "notes" ? null : "notes")} className={btn} title="Notes">
+          <NotebookPen size={18} />
+        </button>
+        <button
+          onClick={() => {
+            const next = openPanel === "documents" ? null : "documents";
+            setOpenPanel(next);
+            if (next) refreshDocuments();
+          }}
+          className={btn}
+          title="Documents"
+        >
+          <FileText size={18} />
+        </button>
+        <button onClick={() => navigate(`/whiteboard/${whiteboardId}/study`)} className={btn} title="Study">
+          <GraduationCap size={18} />
         </button>
 
         {/* Share / copy link — opens share popup for signed-in users, just copies for guests */}
@@ -908,6 +1088,37 @@ export default function WhiteboardEditor() {
               pending={aiPending}
               onSend={sendAiChat}
               onAddToNotes={addAiAnswerToNotes}
+              onClose={() => setOpenPanel(null)}
+            />
+          </div>
+        )}
+        {openPanel === "notes" && (
+          <div className="absolute inset-y-0 right-0 z-40">
+            <NotesPanel
+              variant="sheet"
+              noteType={noteType}
+              onNoteTypeChange={setNoteType}
+              onGenerate={generateNotes}
+              lines={notesLines}
+              generating={notesBusy}
+              onHighlight={highlightSources}
+              onClose={() => setOpenPanel(null)}
+            />
+          </div>
+        )}
+        {openPanel === "documents" && (
+          <div className="absolute inset-y-0 right-0 z-40">
+            <DocumentsPanel
+              variant="sheet"
+              documents={documents}
+              activeDoc={activeDoc}
+              activePage={activePage}
+              rawUrl={(doc) => boardDocumentRawUrl(whiteboardId, doc.docId)}
+              onUpload={uploadDocument}
+              onSelectDocument={openDocument}
+              onJumpToPage={setActivePage}
+              onDelete={removeDocument}
+              uploading={uploadingDoc}
               onClose={() => setOpenPanel(null)}
             />
           </div>

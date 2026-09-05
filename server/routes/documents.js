@@ -33,6 +33,10 @@ const { authMiddleware } = require("../middleware/auth");
 const { rateLimit } = require("../middleware/rateLimit");
 const { db } = require("../db");
 const { canAccessBoard } = require("../auth/boards");
+const { createChunkStore } = require("../retrieval/store");
+const { createRetriever } = require("../retrieval");
+const { createGeminiFromConfig } = require("../gemini");
+const config = require("../config");
 const {
   createDocumentStore,
   normalizePages,
@@ -60,6 +64,24 @@ function getStore() {
     _store = createDocumentStore({ bucket, collection });
   }
   return _store;
+}
+
+// The retriever shares the document store and the central Gemini module. Null when
+// embeddings are unavailable, so the upload path simply skips indexing.
+let _retriever = null;
+function getRetriever(documents) {
+  if (_retriever !== null) return _retriever || null;
+  const gemini = createGeminiFromConfig(config);
+  if (!gemini || typeof gemini.embed !== "function") {
+    _retriever = false; // remembered so we do not rebuild on every upload
+    return null;
+  }
+  _retriever = createRetriever({
+    gemini,
+    chunks: createChunkStore({ collection: db.collection("documentChunks") }),
+    documents,
+  });
+  return _retriever;
 }
 
 module.exports = function documentRoutes({ store } = {}) {
@@ -128,7 +150,8 @@ module.exports = function documentRoutes({ store } = {}) {
       });
     }
 
-    const summary = await resolveStore().upload({
+    const store = resolveStore();
+    const summary = await store.upload({
       boardId: req.params.id,
       kind,
       filename: typeof filename === "string" && filename ? filename : "document",
@@ -136,6 +159,20 @@ module.exports = function documentRoutes({ store } = {}) {
       buffer,
       pages,
     });
+
+    // Index the document for retrieval (D14) — chunk + embed ONCE, here at upload,
+    // so retrieve() never pays a model call per query. Indexing is best-effort: a
+    // document is still uploaded, viewable and citable if embeddings are
+    // unavailable (no Gemini key, or the embed call fails); retrieval simply
+    // returns nothing for it until it is indexed. Failing the upload over this
+    // would lose the user's file for a degraded side feature.
+    const retriever = getRetriever(store);
+    if (retriever) {
+      retriever
+        .indexDocument(summary.docId, { userId: req.user.userId })
+        .catch((err) => console.error("[documents] indexing failed:", err.message));
+    }
+
     res.status(201).json(summary);
   });
 

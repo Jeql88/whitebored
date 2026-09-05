@@ -118,3 +118,39 @@ export function gradeBoardCard(id, cardId, grade, { deck = "notes" } = {}) {
     body: { grade, deck },
   });
 }
+
+// Generate (or regenerate) a board's card deck from its notes. Regeneration keeps
+// a reviewed card's schedule — the server routes it through the shared reconcile
+// primitive — so studying progress survives a rebuild.
+export function generateBoardCards(id, { deck = "notes", boardElementIds = [] } = {}) {
+  return apiFetch(`${WB}/${id}/cards/generate`, {
+    method: "POST",
+    body: { deck, boardElementIds },
+  });
+}
+
+// --- Documents (D13) --------------------------------------------------------
+
+export async function getBoardDocuments(id) {
+  const data = await apiFetch(`${WB}/${id}/documents`);
+  return Array.isArray(data) ? data : [];
+}
+
+export function getBoardDocument(id, docId) {
+  return apiFetch(`${WB}/${id}/documents/${docId}`);
+}
+
+// Upload a document. The caller supplies base64 `data`; for a PDF it also supplies
+// `pageTexts` extracted client-side (the server has no PDF infra by design, D13).
+export function uploadBoardDocument(id, doc) {
+  return apiFetch(`${WB}/${id}/documents`, { method: "POST", body: doc });
+}
+
+export function deleteBoardDocument(id, docId) {
+  return apiFetch(`${WB}/${id}/documents/${docId}`, { method: "DELETE" });
+}
+
+// The raw bytes URL, used by the inline PDF/image viewer (and #page=N deep links).
+export function boardDocumentRawUrl(id, docId) {
+  return `${WB}/${id}/documents/${docId}/raw`;
+}
