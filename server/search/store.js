@@ -60,17 +60,25 @@ function matchedFieldsFor(board, needle) {
 // (owner OR editor OR collaborator OR visitor). Centralised here so search enforces
 // EXACTLY the same access as `GET /api/whiteboards` — a user searches only boards they
 // can access (D20). Returns null when there is no user id (caller must fail closed).
-// Widening to the Space (D21) is a change to THIS scope, not to the search store.
-function accessibleBoardsScope(userId) {
+//
+// Widening to the Space (D21) is a change to THIS scope ONLY — the search store's
+// matching mechanism never changes. Pass the ids of the Spaces the user belongs to as
+// the optional second argument and the scope grows by ONE clause — `{ spaceId: { $in }}`
+// — ADDED to the four per-board-sharing clauses (membership LAYERS ON TOP of per-board
+// sharing, it does not replace it). Omit the argument (the D20 callers) and the scope is
+// exactly the original four-clause $or, byte-for-byte, so existing behaviour is intact.
+function accessibleBoardsScope(userId, memberSpaceIds = []) {
   if (!userId) return null;
-  return {
-    $or: [
-      { userId },
-      { editors: userId },
-      { "collaborators.userId": userId },
-      { visitors: userId },
-    ],
-  };
+  const clauses = [
+    { userId },
+    { editors: userId },
+    { "collaborators.userId": userId },
+    { visitors: userId },
+  ];
+  if (Array.isArray(memberSpaceIds) && memberSpaceIds.length > 0) {
+    clauses.push({ spaceId: { $in: memberSpaceIds } });
+  }
+  return { $or: clauses };
 }
 
 function createSearchStore({ collection } = {}) {

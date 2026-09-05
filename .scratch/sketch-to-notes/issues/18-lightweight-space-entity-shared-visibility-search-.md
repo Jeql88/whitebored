@@ -1,6 +1,6 @@
 # Lightweight Space entity — shared visibility, search, combined study (D21)
 
-Status: ready-for-agent
+Status: done
 Slice: 18
 
 ## Parent

@@ -17,6 +17,7 @@ const { authMiddleware } = require("../middleware/auth");
 const { rateLimit } = require("../middleware/rateLimit");
 const { getCollections } = require("../db");
 const { createSearchStore, accessibleBoardsScope } = require("../search/store");
+const { createSpaceStore } = require("../spaces");
 
 const byUser = (req) => req.user?.userId || req.ip;
 // Search is read-only and cheap, but bound it so a hot loop can't hammer Mongo.
@@ -31,11 +32,22 @@ module.exports = function searchRoutes() {
     const rawLimit = Number.parseInt(req.query.limit, 10);
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
 
-    const { whiteboards } = getCollections();
+    const { whiteboards, spaces } = getCollections();
     const store = createSearchStore({ collection: whiteboards });
-    const scope = accessibleBoardsScope(req.user.userId);
 
     try {
+      // Widen the D20 scope to the user's Spaces (D21): the SAME search mechanism runs,
+      // only the access filter grows to include boards carrying a Space id the user has
+      // joined. Membership LAYERS ON TOP of per-board sharing. Fail soft — if the Space
+      // lookup errors, fall back to the per-board-sharing scope rather than 500ing search.
+      let memberSpaceIds = [];
+      try {
+        memberSpaceIds = await createSpaceStore({ collection: spaces }).memberSpaceIds(req.user.userId);
+      } catch (e) {
+        console.error("[search] space scope lookup failed, falling back to own boards:", e.message);
+      }
+      const scope = accessibleBoardsScope(req.user.userId, memberSpaceIds);
+
       const results = await store.search({ query, scope, limit });
       res.json({ query: query.trim(), results });
     } catch (err) {

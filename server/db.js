@@ -21,6 +21,7 @@ const collections = {
   comments: null,
   users: null,
   notes: null, // one Notes artifact record per board (Sketch-to-Notes, D6)
+  spaces: null, // group-study Space entity (Sketch-to-Notes, D21) — members + boards
 };
 
 async function connectDB() {
@@ -37,6 +38,8 @@ async function connectDB() {
   // resolve accounts through this handle.
   collections.users = db.collection("user");
   collections.notes = db.collection("notes");
+  // Group-study Spaces (D21). A Space has members and gathers boards that carry its id.
+  collections.spaces = db.collection("spaces");
 
   // One snapshot doc per board — enforce + speed up lookups by whiteboardId.
   await collections.scenes.createIndex({ whiteboardId: 1 }, { unique: true });
@@ -61,6 +64,12 @@ async function connectDB() {
   });
   // Default dashboard sort — without this every list request is a full collection scan.
   await collections.whiteboards.createIndex({ updatedAt: -1 });
+  // Space membership grants visibility/search of boards carrying a spaceId (D21). This
+  // index speeds the widened search scope's `{ spaceId: { $in } }` clause and the
+  // spaceBoardIds lookup. Additive — it does not affect existing per-board sharing.
+  await collections.whiteboards.createIndex({ spaceId: 1 });
+  // Space membership lookup (which Spaces a user belongs to → memberSpaceIds).
+  await collections.spaces.createIndex({ members: 1 });
   // Comment listing per board.
   await collections.comments.createIndex({ whiteboardId: 1, createdAt: 1 });
 
