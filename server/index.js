@@ -136,6 +136,12 @@ app.get("/healthz/config", (req, res) => {
       embedModel: config.GEMINI_EMBED_MODEL,
     },
     visionKeyConfigured: Boolean(config.GOOGLE_VISION_KEY),
+    // Names of every GEMINI_* variable actually present in this process. If the
+    // dashboard shows a row but this list omits it, the value was never saved —
+    // which distinguishes a dashboard problem from an application one.
+    geminiEnvVarsPresent: Object.keys(process.env)
+      .filter((k) => k.startsWith("GEMINI"))
+      .map((k) => `${k}:${(process.env[k] || "").length}`),
   });
 });
 
