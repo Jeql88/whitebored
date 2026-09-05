@@ -1,6 +1,6 @@
 # Coverage report — stable topic list + semantic coverage (D16)
 
-Status: ready-for-agent
+Status: done
 Slice: 16
 
 ## Parent
