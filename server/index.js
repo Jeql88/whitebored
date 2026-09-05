@@ -131,6 +131,15 @@ app.get("/healthz/config", (req, res) => {
       // The single check every AI route gates on (createGeminiFromConfig returns
       // null when this is falsy, which is what produces "not configured").
       keyConfigured: Boolean(config.GEMINI_API_KEY),
+      // Which of the three sources supplied the key, so a fix can be confirmed
+      // without guessing which one Render honoured.
+      keySource: process.env.GEMINI_API_KEY
+        ? "env:GEMINI_API_KEY"
+        : process.env.GOOGLE_GEMINI_KEY
+          ? "env:GOOGLE_GEMINI_KEY"
+          : config.GEMINI_API_KEY
+            ? "secret-file"
+            : "none",
       keyLength: (config.GEMINI_API_KEY || "").length,
       model: config.GEMINI_MODEL,
       embedModel: config.GEMINI_EMBED_MODEL,

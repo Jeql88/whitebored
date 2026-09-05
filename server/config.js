@@ -15,14 +15,41 @@ const DB_NAME = process.env.DB_NAME || "whiteboard";
 const GOOGLE_VISION_KEY = process.env.GOOGLE_VISION_KEY || "";
 // Optional: enables the Sketch-to-Notes AI features (Gemini). If unset, the
 // central Gemini module has no real client and AI features degrade gracefully.
-// The Gemini key, accepted under either name. GEMINI_API_KEY is the intended one,
-// but a deployment can end up where that specific variable never reaches the
-// process while GOOGLE_*-prefixed ones do (observed on Render: the dashboard row
-// showed a value, yet the running process had no GEMINI_* variables at all while
-// GOOGLE_VISION_KEY arrived fine). GOOGLE_GEMINI_KEY is a working alias for that
-// case — set whichever one your host actually delivers.
+// The Gemini key, resolved from the first source that actually has it.
+//
+// Normally this is just GEMINI_API_KEY. The other two sources exist because a
+// host can fail to deliver a specific env var: on this project's Render service,
+// the dashboard showed a saved GEMINI_API_KEY yet the running process had no
+// GEMINI_* variable at all, while pre-existing GOOGLE_* ones arrived fine — and a
+// GOOGLE_GEMINI_KEY alias failed the same way, so it was not the name.
+//
+// A SECRET FILE is the reliable way out without recreating the service: Render
+// mounts secret files through a different mechanism than environment variables,
+// so it does not depend on the env path that is broken. Create a secret file
+// named gemini_key (contents: just the key) and it is picked up here.
+function readSecretFile() {
+  // Render mounts secret files at the project root in production and at
+  // /etc/secrets; check both plus an explicit override path.
+  const candidates = [
+    process.env.GEMINI_KEY_FILE,
+    "/etc/secrets/gemini_key",
+    require("path").join(process.cwd(), "gemini_key"),
+  ].filter(Boolean);
+
+  for (const file of candidates) {
+    try {
+      const value = require("fs").readFileSync(file, "utf8").trim();
+      if (value) return value;
+    } catch {
+      // Absent or unreadable is the normal case — try the next candidate. Only a
+      // present, readable file should win, so nothing is logged here.
+    }
+  }
+  return "";
+}
+
 const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_KEY || "";
+  process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_KEY || readSecretFile();
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 // Retrieval embeddings (D14). Read here so the deployed value actually reaches
 // the client seam; realClient falls back to its own default when this is empty.

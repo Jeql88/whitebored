@@ -8,3 +8,7 @@ client/dist/
 *.log
 .DS_Store
 .vscode/
+.loopdog/
+
+# Gemini key delivered as a Render secret file (never committed)
+gemini_key
