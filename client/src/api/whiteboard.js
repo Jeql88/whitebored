@@ -89,3 +89,32 @@ export function removeCollaborator(id, userId) {
 export function updateCollaboratorRole(id, userId, role) {
   return apiFetch(`${WB}/${id}/collaborators/${userId}`, { method: "PATCH", body: { role } });
 }
+
+// --- Study (slice #9): the board's flashcard/mock-exam cards ---------------------
+//
+// The full-screen study route reads the board's cards (one data model, two views:
+// flashcards + mock exam) and posts a grade back to schedule the card. Cards are the
+// server/cards shape ({ id, question, answer, deck, boardId, sourceElementIds,
+// reviewState }); grading is applied server-side via SM-2 review() (never client-side).
+//
+// `deck` scopes the source (story 34): "notes" is the notes-only deck this slice ships;
+// "document" and combined decks arrive with the documents/scope slices.
+
+export async function getBoardCards(id, { deck = "notes" } = {}) {
+  const params = new URLSearchParams({ deck });
+  const data = await apiFetch(`${WB}/${id}/cards?${params}`);
+  return {
+    cards: Array.isArray(data.cards) ? data.cards : [],
+    deck: typeof data.deck === "string" ? data.deck : deck,
+    error: data.error,
+  };
+}
+
+// Post a self-assessed grade (SM-2 quality 0–5) for one card; the server applies
+// review() and returns the card's new reviewState. Scheduling is never done client-side.
+export function gradeBoardCard(id, cardId, grade, { deck = "notes" } = {}) {
+  return apiFetch(`${WB}/${id}/cards/${cardId}/grade`, {
+    method: "POST",
+    body: { grade, deck },
+  });
+}

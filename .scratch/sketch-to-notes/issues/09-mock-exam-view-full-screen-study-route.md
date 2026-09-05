@@ -1,6 +1,6 @@
 # Mock-exam view + full-screen study route (D17, D22)
 
-Status: ready-for-agent
+Status: done
 Slice: 9
 
 ## Parent

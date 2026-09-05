@@ -24,6 +24,11 @@ const WhiteboardEditor = lazy(() =>
   import("./components/Whiteboard/WhiteboardEditor")
 );
 
+// The full-screen study route (slice #9, D22/story 41): flashcards + mock exam over a
+// board's cards open in their own full view, not a cramped side tab. Lazy like the
+// editor so the study bundle doesn't load until the user studies.
+const StudyRoute = lazy(() => import("./components/Whiteboard/StudyRoute"));
+
 function EditorFallback() {
   return (
     <div className="flex h-screen w-screen items-center justify-center text-[var(--surface-muted)]">
@@ -94,6 +99,16 @@ export default function App() {
             element={
               <Suspense fallback={<EditorFallback />}>
                 <WhiteboardEditor />
+              </Suspense>
+            }
+          />
+          {/* Full-screen study route (D22/story 41): flashcards + mock exam in their
+              own view. Public like the editor — access is enforced at the API level. */}
+          <Route
+            path="/whiteboard/:id/study"
+            element={
+              <Suspense fallback={<EditorFallback />}>
+                <StudyRoute />
               </Suspense>
             }
           />
