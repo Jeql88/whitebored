@@ -119,6 +119,26 @@ app.get("/healthz", async (req, res) => {
   }
 });
 
+// Which optional integrations this instance actually has configured. Reports
+// BOOLEANS and model names only — never key material — so a deployed instance can
+// be diagnosed without shell access. Without this, "the key is set" and "the app
+// can see the key" are indistinguishable from the outside, which is exactly the
+// confusion that makes a missing env var so slow to track down.
+app.get("/healthz/config", (req, res) => {
+  res.json({
+    env: config.NODE_ENV,
+    gemini: {
+      // The single check every AI route gates on (createGeminiFromConfig returns
+      // null when this is falsy, which is what produces "not configured").
+      keyConfigured: Boolean(config.GEMINI_API_KEY),
+      keyLength: (config.GEMINI_API_KEY || "").length,
+      model: config.GEMINI_MODEL,
+      embedModel: config.GEMINI_EMBED_MODEL,
+    },
+    visionKeyConfigured: Boolean(config.GOOGLE_VISION_KEY),
+  });
+});
+
 // REST API.
 app.use("/api/admin", adminRoutes());
 app.use("/api/whiteboards", whiteboardRoutes(io));
