@@ -27,6 +27,15 @@ services:
         sync: false
       - key: GOOGLE_VISION_KEY
         sync: false
+      # Sketch-to-Notes: every AI feature routes through the central Gemini module.
+      # Without this key the module returns null and notes/cards/chat/coverage all
+      # degrade to "not configured" rather than erroring — set it in the dashboard.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: GEMINI_EMBED_MODEL
+        value: text-embedding-004
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

@@ -13,7 +13,6 @@ import jsPDF from "jspdf";
 import {
   ArrowLeft,
   MessageSquare,
-  MessagesSquare,
   Sparkles,
   Link2,
   Check,
@@ -43,15 +42,22 @@ import {
   uploadBoardDocument,
   deleteBoardDocument,
   boardDocumentRawUrl,
+  generateBoardCards,
+  getFactCheck,
+  runFactCheck,
+  setFactCheckFlagStatus,
+  getCoverage,
+  runCoverage,
+  getScope,
+  saveScope,
 } from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
 import CommentsSidebar from "./CommentsSidebar";
-import ChatBox from "../Chatbox";
 import ChatPanel from "./ChatPanel";
 import { addToNotesPayload } from "../../utils/addToNotes";
-import NotesPanel from "./NotesPanel";
-import DocumentsPanel from "./DocumentsPanel";
+import { extractPdfPageTexts, hasTextLayer } from "../../utils/pdfText";
+import StudioSidebar from "./StudioSidebar";
 import { appendLine } from "../../utils/notesArtifact";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
@@ -103,6 +109,30 @@ export default function WhiteboardEditor() {
   const [activeDoc, setActiveDoc] = useState(null);
   const [activePage, setActivePage] = useState(1);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  // Which tool the single sidebar is showing, and the state each one reads.
+  const [studioTab, setStudioTab] = useState("notes");
+  const [factCheckFlags, setFactCheckFlags] = useState([]);
+  const [coverageReport, setCoverageReport] = useState(null);
+  const [scope, setScope] = useState({
+    source: "notes",
+    range: { kind: "all" },
+    count: 10,
+    difficulty: "mixed",
+    format: "flashcards",
+  });
+  const [scopeDiff, setScopeDiff] = useState(null);
+
+  // The sidebar overlays as a sheet on narrow screens and docks as a column on
+  // wide ones (D22). Tracking it here means the canvas reflows once, on resize.
+  const [isNarrow, setIsNarrow] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 1024
+  );
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 1024);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [aiPending, setAiPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [socket, setSocket] = useState(null);
@@ -769,15 +799,18 @@ export default function WhiteboardEditor() {
         });
 
         const kind = file.type === "application/pdf" ? "pdf" : file.type.startsWith("image/") ? "image" : "text";
-        // Per-page PDF text extraction needs a browser PDF library (pdfjs), which
-        // this app does not ship yet — so a PDF has no text layer to send and the
-        // server will refuse it with a clear 422 rather than storing something the
-        // retrieval/coverage features can't read. Text and image files work fully.
-        if (kind === "pdf") {
-          return showToast("PDF text extraction isn't available yet — upload a .txt or an image for now.");
-        }
         const body = { kind, filename: file.name, contentType: file.type, data };
         if (kind === "text") body.text = await file.text();
+        if (kind === "pdf") {
+          // Page text is read in the browser (D13 — the server has no PDF infra).
+          showToast("Reading PDF text…");
+          body.pageTexts = await extractPdfPageTexts(file);
+          // Catch a scan HERE rather than uploading megabytes the server will
+          // refuse: the user gets the real reason instead of a generic 422.
+          if (!hasTextLayer(body.pageTexts)) {
+            return showToast("That PDF has no selectable text (it looks scanned), so it can't be searched yet.");
+          }
+        }
 
         const summary = await uploadBoardDocument(whiteboardId, body);
         if (summary?.error) return showToast(summary.error);
@@ -804,6 +837,140 @@ export default function WhiteboardEditor() {
     },
     [whiteboardId, activeDoc, refreshDocuments]
   );
+
+  // --- Fact-check, coverage, scope ------------------------------------------
+
+  // Scope persists per board (D19), so restore it rather than resetting the bar
+  // to defaults on every reload.
+  useEffect(() => {
+    if (isGuest) return;
+    let cancelled = false;
+    getScope(whiteboardId)
+      .then((saved) => {
+        if (!cancelled && saved && !saved.error) setScope(saved);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [whiteboardId, isGuest]);
+
+  // Pull whatever the last passes stored when the sidebar opens, so the tabs show
+  // prior results immediately instead of looking empty until a re-run.
+  useEffect(() => {
+    if (openPanel !== "studio" || isGuest) return;
+    getFactCheck(whiteboardId)
+      .then((r) => setFactCheckFlags(r?.flags || []))
+      .catch(() => {});
+    getCoverage(whiteboardId)
+      .then((r) => setCoverageReport(r?.report || null))
+      .catch(() => {});
+  }, [openPanel, whiteboardId, isGuest]);
+
+  // Persist scope whenever it settles, so the bar restores what the user left.
+  const updateScope = useCallback(
+    (next) => {
+      setScope(next);
+      setScopeDiff(null);
+      saveScope(whiteboardId, next).catch(() => {});
+    },
+    [whiteboardId]
+  );
+
+  // Run the passes on demand. Both return empty rather than erroring when there is
+  // no document attached or no Gemini key, so the panels stay honest.
+  const runFactCheckNow = useCallback(async () => {
+    showToast("Checking your notes against your sources…");
+    try {
+      const r = await runFactCheck(whiteboardId);
+      setFactCheckFlags(r?.flags || []);
+      if (!r?.flags?.length) showToast("No contradictions found.");
+    } catch {
+      showToast("Couldn't run the fact-check.");
+    }
+  }, [whiteboardId]);
+
+  const runCoverageNow = useCallback(async () => {
+    showToast("Checking what your board covers…");
+    try {
+      const r = await runCoverage(whiteboardId);
+      setCoverageReport(r?.report || null);
+      if (!r?.report) showToast("Attach a document first — coverage compares your board against it.");
+    } catch {
+      showToast("Couldn't build the coverage report.");
+    }
+  }, [whiteboardId]);
+
+
+  // Jump the Documents tab to a citation's page. Both fact-check flags and
+  // coverage gaps cite {docId, page}, so one handler serves both.
+  const jumpToCitation = useCallback(
+    async (citation) => {
+      if (!citation?.docId) return;
+      setStudioTab("documents");
+      if (!activeDoc || activeDoc.docId !== citation.docId) {
+        await openDocument(citation.docId);
+      }
+      if (Number.isInteger(citation.page)) setActivePage(citation.page);
+    },
+    [activeDoc, openDocument]
+  );
+
+  // Accept a flag: the server never auto-edits notes, so accepting only records
+  // the decision and (when it offers one) surfaces a suggested line edit.
+  const acceptFlag = useCallback(
+    (flag) => {
+      setFactCheckFlags((prev) =>
+        prev.map((f) => (f.id === flag.id ? { ...f, status: "accepted" } : f))
+      );
+      setFactCheckFlagStatus(whiteboardId, flag.id, "accepted").catch(() => {});
+    },
+    [whiteboardId]
+  );
+
+  // Dismissals persist server-side across regeneration; locally we just drop it
+  // from the open list so the user is not re-nagged in this session.
+  const dismissFlag = useCallback(
+    (flag) => {
+      setFactCheckFlags((prev) =>
+        prev.map((f) => (f.id === flag.id ? { ...f, status: "dismissed" } : f))
+      );
+      // The dismissal must reach the server: that is what keeps it dismissed
+      // across the next regeneration.
+      setFactCheckFlagStatus(whiteboardId, flag.id, "dismissed").catch(() => {});
+    },
+    [whiteboardId]
+  );
+
+  const confirmScopeRange = useCallback(() => {
+    setScope((prev) => {
+      const next = { ...prev, range: { ...prev.range, confirmed: true } };
+      saveScope(whiteboardId, next).catch(() => {});
+      return next;
+    });
+    setScopeDiff(null);
+  }, [whiteboardId]);
+
+  // Generate study material for the current scope. Cards are built from the
+  // board's notes server-side; regeneration keeps a reviewed card's schedule.
+  const generateStudy = useCallback(async () => {
+    if (!notesLines.length) {
+      return showToast("Generate notes first — cards are built from them.");
+    }
+    showToast("Building your deck…");
+    try {
+      const api = apiRef.current;
+      const boardElementIds = api ? api.getSceneElements().map((el) => el.id) : [];
+      const result = await generateBoardCards(whiteboardId, {
+        deck: scope.source === "documents" ? "document" : "notes",
+        boardElementIds,
+      });
+      if (result?.error) return showToast(result.error);
+      showToast(`Made ${result.cards?.length ?? 0} cards. Open Study to review them.`);
+    } catch {
+      showToast("Couldn't build the deck. Try again.");
+    }
+  }, [whiteboardId, notesLines.length, scope.source]);
 
   const sharePanelRef = useRef(null);
 
@@ -923,25 +1090,12 @@ export default function WhiteboardEditor() {
         <button onClick={() => setOpenPanel(openPanel === "comments" ? null : "comments")} className={btn} title="Comments">
           <MessageSquare size={18} />
         </button>
-        <button onClick={() => setOpenPanel(openPanel === "room" ? null : "room")} className={btn} title="Room">
-          <MessagesSquare size={18} />
-        </button>
-        <button onClick={() => setOpenPanel(openPanel === "aichat" ? null : "aichat")} className={btn} title="Chat">
-          <Sparkles size={18} />
-        </button>
-        <button onClick={() => setOpenPanel(openPanel === "notes" ? null : "notes")} className={btn} title="Notes">
-          <NotebookPen size={18} />
-        </button>
         <button
-          onClick={() => {
-            const next = openPanel === "documents" ? null : "documents";
-            setOpenPanel(next);
-            if (next) refreshDocuments();
-          }}
-          className={btn}
-          title="Documents"
+          onClick={() => setOpenPanel(openPanel === "studio" ? null : "studio")}
+          className={`${btn} ${openPanel === "studio" ? "bg-brand-50 text-brand-600 dark:bg-brand-600/15" : ""}`}
+          title="Study tools"
         >
-          <FileText size={18} />
+          <Sparkles size={18} />
         </button>
         <button onClick={() => navigate(`/whiteboard/${whiteboardId}/study`)} className={btn} title="Study">
           <GraduationCap size={18} />
@@ -1071,57 +1225,44 @@ export default function WhiteboardEditor() {
             currentUserId={me.userId}
           />
         )}
-        {openPanel === "room" && (
-          <ChatBox
-            socket={socket}
-            userId={me.userId}
-            whiteboardId={whiteboardId}
-            username={me.username}
+        {openPanel === "studio" && (
+          <StudioSidebar
+            variant={isNarrow ? "sheet" : "docked"}
+            activeTab={studioTab}
+            onTabChange={setStudioTab}
             onClose={() => setOpenPanel(null)}
+            noteType={noteType}
+            onNoteTypeChange={setNoteType}
+            onGenerateNotes={generateNotes}
+            notesLines={notesLines}
+            notesBusy={notesBusy}
+            onHighlight={highlightSources}
+            messages={aiChat}
+            chatPending={aiPending}
+            onSendChat={sendAiChat}
+            onAddToNotes={addAiAnswerToNotes}
+            documents={documents}
+            activeDoc={activeDoc}
+            activePage={activePage}
+            rawUrl={(doc) => boardDocumentRawUrl(whiteboardId, doc.docId)}
+            onUpload={uploadDocument}
+            onSelectDocument={openDocument}
+            onJumpToPage={setActivePage}
+            onDeleteDocument={removeDocument}
+            uploadingDoc={uploadingDoc}
+            flags={factCheckFlags}
+            onAcceptFlag={acceptFlag}
+            onDismissFlag={dismissFlag}
+            onCitationClick={jumpToCitation}
+            coverageReport={coverageReport}
+            onRunFactCheck={runFactCheckNow}
+            onRunCoverage={runCoverageNow}
+            scope={scope}
+            scopeDiff={scopeDiff}
+            onScopeChange={updateScope}
+            onConfirmScope={confirmScopeRange}
+            onGenerateStudy={generateStudy}
           />
-        )}
-        {openPanel === "aichat" && (
-          <div className="absolute inset-y-0 right-0 z-40">
-            <ChatPanel
-              variant="sheet"
-              messages={aiChat}
-              pending={aiPending}
-              onSend={sendAiChat}
-              onAddToNotes={addAiAnswerToNotes}
-              onClose={() => setOpenPanel(null)}
-            />
-          </div>
-        )}
-        {openPanel === "notes" && (
-          <div className="absolute inset-y-0 right-0 z-40">
-            <NotesPanel
-              variant="sheet"
-              noteType={noteType}
-              onNoteTypeChange={setNoteType}
-              onGenerate={generateNotes}
-              lines={notesLines}
-              generating={notesBusy}
-              onHighlight={highlightSources}
-              onClose={() => setOpenPanel(null)}
-            />
-          </div>
-        )}
-        {openPanel === "documents" && (
-          <div className="absolute inset-y-0 right-0 z-40">
-            <DocumentsPanel
-              variant="sheet"
-              documents={documents}
-              activeDoc={activeDoc}
-              activePage={activePage}
-              rawUrl={(doc) => boardDocumentRawUrl(whiteboardId, doc.docId)}
-              onUpload={uploadDocument}
-              onSelectDocument={openDocument}
-              onJumpToPage={setActivePage}
-              onDelete={removeDocument}
-              uploading={uploadingDoc}
-              onClose={() => setOpenPanel(null)}
-            />
-          </div>
         )}
       </div>
 

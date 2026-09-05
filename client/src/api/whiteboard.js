@@ -154,3 +154,35 @@ export function deleteBoardDocument(id, docId) {
 export function boardDocumentRawUrl(id, docId) {
   return `${WB}/${id}/documents/${docId}/raw`;
 }
+
+// --- Study tools: fact-check, coverage, scope (D15/D16/D19) -----------------
+
+export function getFactCheck(id) {
+  return apiFetch(`${WB}/${id}/factcheck`);
+}
+
+export function runFactCheck(id) {
+  return apiFetch(`${WB}/${id}/factcheck`, { method: "POST", body: {} });
+}
+
+// Accept or dismiss one flag. A dismissal persists so the next regeneration does
+// not re-raise it.
+export function setFactCheckFlagStatus(id, flagId, status) {
+  return apiFetch(`${WB}/${id}/factcheck/${flagId}`, { method: "PATCH", body: { status } });
+}
+
+export function getCoverage(id) {
+  return apiFetch(`${WB}/${id}/coverage`);
+}
+
+export function runCoverage(id, { docId } = {}) {
+  return apiFetch(`${WB}/${id}/coverage`, { method: "POST", body: { docId } });
+}
+
+export function getScope(id) {
+  return apiFetch(`${WB}/${id}/scope`);
+}
+
+export function saveScope(id, scope) {
+  return apiFetch(`${WB}/${id}/scope`, { method: "PUT", body: { scope } });
+}
