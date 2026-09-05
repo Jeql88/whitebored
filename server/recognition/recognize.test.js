@@ -153,3 +153,30 @@ test("a deferred (throttled) model call still resolves to a reading (story 56)",
   const second = await pending;
   assert.deepEqual(second[0].segments, [{ text: "queued", uncertain: false }]);
 });
+
+test("an ink crop is sent as inlineData the API accepts, not a raw data URL", async () => {
+  // The Gemini API rejects `{ image: "data:image/png;base64,…" }` with a 400:
+  // a part must carry `inlineData: { mimeType, data }` where data is BARE base64.
+  // This asserts the wire format, which the crop-id tests never looked at.
+  const stub = createGeminiStub();
+  stub.enqueue({ text: JSON.stringify({ c1: { segments: [{ text: "hi", uncertain: false }] } }) });
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+
+  await recognizer.recognize([
+    {
+      cropId: "c1",
+      kind: "ink",
+      image: "data:image/png;base64,AAAA",
+      sourceElementIds: ["s1"],
+      bbox: { x: 0, y: 0, width: 1, height: 1 },
+    },
+  ]);
+
+  const parts = stub.calls[0].contents[0].parts;
+  const imagePart = parts.find((p) => p.inlineData);
+  assert.ok(imagePart, "expected an inlineData part");
+  assert.equal(imagePart.inlineData.mimeType, "image/png");
+  // The data: prefix must be stripped — the API wants base64 only.
+  assert.equal(imagePart.inlineData.data, "AAAA");
+  assert.ok(!parts.some((p) => "image" in p), "no part should use the invalid `image` key");
+});

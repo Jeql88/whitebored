@@ -77,11 +77,21 @@ function parseBatch(text) {
 // its normalized image (a data URL the client already attached). The exact
 // contents wiring is an internal detail; tests assert the crop ids are present
 // and that it is a single call.
+// Split a data URL into the shape the API actually accepts. A part must carry
+// `inlineData: { mimeType, data }` with BARE base64 — passing the whole data URL
+// (or an `image` key) is rejected with a 400 "must have one initialized field".
+function inlineDataOf(dataUrl) {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl || "");
+  if (match) return { mimeType: match[1], data: match[2] };
+  // Already bare base64: assume PNG, which is what the client rasterizes to.
+  return { mimeType: "image/png", data: dataUrl || "" };
+}
+
 function buildRequest(userId, inkCrops) {
   const parts = [{ text: SCHEMA_INSTRUCTION }];
   for (const crop of inkCrops) {
     parts.push({ text: `cropId: ${crop.cropId}` });
-    parts.push({ image: crop.image });
+    parts.push({ inlineData: inlineDataOf(crop.image) });
   }
   return {
     userId,
