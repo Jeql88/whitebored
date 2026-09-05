@@ -148,6 +148,23 @@ app.get("/healthz/config", (req, res) => {
     // Names of every GEMINI_* variable actually present in this process. If the
     // dashboard shows a row but this list omits it, the value was never saved —
     // which distinguishes a dashboard problem from an application one.
+    // Where a mounted secret file would actually be, so a wrong assumed path is
+    // visible rather than guessed at. Lists directory contents only — never file
+    // contents — so nothing secret is exposed.
+    secretFileProbe: (() => {
+      const fs = require("fs");
+      const path = require("path");
+      const out = {};
+      for (const dir of ["/etc/secrets", process.cwd()]) {
+        try {
+          out[dir] = fs.readdirSync(dir).filter((f) => !f.startsWith("."));
+        } catch (err) {
+          out[dir] = `unreadable: ${err.code}`;
+        }
+      }
+      out.cwd = process.cwd();
+      return out;
+    })(),
     geminiEnvVarsPresent: Object.keys(process.env)
       .filter((k) => k.startsWith("GEMINI") || k.startsWith("GOOGLE"))
       .map((k) => `${k}:${(process.env[k] || "").length}`),
