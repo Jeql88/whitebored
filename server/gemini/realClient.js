@@ -50,7 +50,7 @@ function normalizeError(err) {
 // Free-tier embedding model. Distinct from the generation model; overridable via
 // config (GEMINI_EMBED_MODEL) at the wiring seam, defaulted here so the embed path
 // works out of the box.
-const DEFAULT_EMBED_MODEL = "text-embedding-004";
+const DEFAULT_EMBED_MODEL = "gemini-embedding-001";
 
 function createRealClient({ apiKey, model, embedModel = DEFAULT_EMBED_MODEL } = {}) {
   if (!apiKey) {
