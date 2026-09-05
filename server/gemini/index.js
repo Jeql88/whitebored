@@ -102,6 +102,34 @@ function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
     return { status: "ok", response };
   }
 
+  // Embeddings share the client seam and the same 429 backoff, but are a distinct
+  // model capability (embedContent, not generateContent), so they get their own
+  // client method rather than overloading generate(). Retrieval (slice #12/D14) is
+  // the single caller: it embeds each chunk ONCE at upload and a query ONCE per
+  // search, always through this choke point — no feature touches the SDK directly.
+  //
+  // Embeddings are not part of the burst-smoothing "deferred/working" story (that
+  // serves interactive generate calls); an upload-time or query-time embed simply
+  // awaits its result. It still rides the 429 backoff so a rate-limited embed
+  // retries instead of failing. Returns whatever the client's embed resolves to
+  // (the retrieval module normalizes the vector shape).
+  async function embedWithBackoff(request) {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await client.embed(request);
+      } catch (err) {
+        if (!isRateLimit(err) || attempt >= backoffCfg.maxRetries) throw err;
+        const wait =
+          err.retryAfterMs != null
+            ? err.retryAfterMs
+            : backoffCfg.baseMs * 2 ** attempt;
+        attempt += 1;
+        await delay(wait);
+      }
+    }
+  }
+
   // Drain a user's queue as budget frees up, smoothing the burst across windows.
   // Runs at most once per user at a time; re-arms itself via the clock until the
   // queue empties.
@@ -153,7 +181,19 @@ function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
     return { status: "deferred", done };
   }
 
-  return { generate };
+  // Public embeddings entry point. Present only when the injected client can embed,
+  // so a client wired for generate-only degrades by simply not exposing embed()
+  // (callers null-check, same as createGeminiFromConfig returning null).
+  async function embed(request) {
+    if (typeof client.embed !== "function") {
+      throw new Error("gemini.embed: the injected client does not support embeddings");
+    }
+    return embedWithBackoff(request);
+  }
+
+  const api = { generate };
+  if (typeof client.embed === "function") api.embed = embed;
+  return api;
 }
 
 // Production wiring: build the central module from config with the real Gemini
@@ -167,6 +207,7 @@ function createGeminiFromConfig(config, opts = {}) {
   const client = createRealClient({
     apiKey: config.GEMINI_API_KEY,
     model: config.GEMINI_MODEL,
+    embedModel: config.GEMINI_EMBED_MODEL,
   });
   return createGemini({ client, ...opts });
 }

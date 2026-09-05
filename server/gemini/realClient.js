@@ -47,7 +47,12 @@ function normalizeError(err) {
   return err; // fail loud on everything else — propagate unchanged
 }
 
-function createRealClient({ apiKey, model } = {}) {
+// Free-tier embedding model. Distinct from the generation model; overridable via
+// config (GEMINI_EMBED_MODEL) at the wiring seam, defaulted here so the embed path
+// works out of the box.
+const DEFAULT_EMBED_MODEL = "text-embedding-004";
+
+function createRealClient({ apiKey, model, embedModel = DEFAULT_EMBED_MODEL } = {}) {
   if (!apiKey) {
     throw new Error("createRealClient: a Gemini apiKey is required");
   }
@@ -70,10 +75,33 @@ function createRealClient({ apiKey, model } = {}) {
         throw normalizeError(err);
       }
     },
+
+    // Embeddings capability behind the same seam (slice #12/D14). The central
+    // module rides its 429 backoff on this exactly as it does generate(). Request
+    // shape: { userId, texts: string[], model? }. Resolves to { embeddings: number[][] }
+    // aligned to `texts` — the shape the retrieval module normalizes. A 429 is
+    // normalized to the same { status: 429 } the module retries on.
+    async embed(request) {
+      const { userId, texts, model: reqModel } = request || {};
+      void userId; // consumed by the module's throttle; not sent to the model
+      const list = Array.isArray(texts) ? texts : [texts];
+      try {
+        const res = await ai.models.embedContent({
+          model: reqModel || embedModel,
+          contents: list,
+        });
+        // The SDK returns { embeddings: [{ values: number[] }, ...] }; unwrap to
+        // plain number[][] so callers never depend on the SDK's envelope.
+        const embeddings = (res?.embeddings || []).map((e) => e?.values || e);
+        return { embeddings };
+      } catch (err) {
+        throw normalizeError(err);
+      }
+    },
   };
 }
 
 // Exported so a test can pin the faithfulness contract: a real Gemini 429 must
 // normalize to the same { status: 429, retryAfterMs? } shape the stub fakes and
 // the central module retries on.
-module.exports = { createRealClient, normalizeError };
+module.exports = { createRealClient, normalizeError, DEFAULT_EMBED_MODEL };

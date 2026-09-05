@@ -1,6 +1,6 @@
 # retrieve(query, scope) seam — chunk, embed, cosine top-k (D14)
 
-Status: ready-for-agent
+Status: done
 Slice: 12
 
 ## Parent

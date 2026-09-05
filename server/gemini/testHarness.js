@@ -35,9 +35,11 @@ class GeminiRateLimitError extends Error {
 function createGeminiStub() {
   const script = []; // { kind: "ok"|"error", value }
   const calls = [];
+  const embedCalls = [];
 
-  return {
+  const stub = {
     calls,
+    embedCalls,
 
     enqueue(response) {
       script.push({ kind: "ok", value: response });
@@ -69,6 +71,59 @@ function createGeminiStub() {
       return step.value;
     },
   };
+
+  // --- embeddings seam ------------------------------------------------------------
+  // The stub only advertises embed() once the test opts in, mirroring the real
+  // client's capability contract: the central module exposes gemini.embed only when
+  // the client supports it. Tests that need embeddings register a canned embedder,
+  // keeping the stub faithful (deterministic vectors, no network, no real model).
+  //
+  //   stub.embedWith(fn)   fn(text) -> number[]; called per input text
+  //   stub.enqueueEmbeddings([[...], ...])  queue one batch of vectors (FIFO)
+  //   stub.enqueueEmbedRateLimit(...)       queue a 429 for the next embed call
+  //   stub.embedCalls      every embed request the module handed the client
+  //
+  // Request shape mirrors the real client: { userId, texts: string[] }. Resolves to
+  // { embeddings: number[][] } aligned to texts.
+  const embedScript = []; // { kind: "ok"|"error", value }
+  let embedFn = null;
+
+  stub.embedWith = function embedWith(fn) {
+    embedFn = fn;
+    return stub;
+  };
+
+  stub.enqueueEmbeddings = function enqueueEmbeddings(embeddings) {
+    embedScript.push({ kind: "ok", value: embeddings });
+    return stub;
+  };
+
+  stub.enqueueEmbedRateLimit = function enqueueEmbedRateLimit({ retryAfterMs } = {}) {
+    embedScript.push({ kind: "error", value: new GeminiRateLimitError({ retryAfterMs }) });
+    return stub;
+  };
+
+  stub.embed = async function embed(request) {
+    embedCalls.push(request);
+    const texts = Array.isArray(request?.texts) ? request.texts : [request?.texts];
+
+    // A queued script step wins (used to inject 429s or exact batches); otherwise
+    // fall back to the per-text embedder function.
+    const step = embedScript.shift();
+    if (step) {
+      if (step.kind === "error") throw step.value;
+      return { embeddings: step.value };
+    }
+    if (embedFn) {
+      return { embeddings: texts.map((t) => embedFn(t)) };
+    }
+    throw new Error(
+      "GeminiStub: embed() called but no embedder was registered " +
+        "(use stub.embedWith(fn) or stub.enqueueEmbeddings([...]))"
+    );
+  };
+
+  return stub;
 }
 
 // Deterministic clock: virtual `now`, and a `setTimeout` that records timers
