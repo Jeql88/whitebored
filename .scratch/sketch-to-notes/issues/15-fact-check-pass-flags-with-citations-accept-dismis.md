@@ -1,6 +1,6 @@
 # Fact-check pass — flags with citations, Accept/Dismiss, dismissals persist (D15)
 
-Status: ready-for-agent
+Status: done
 Slice: 15
 
 ## Parent
