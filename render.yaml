@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: whiteboard-app
+    name: whitebored
     runtime: node
     plan: free
     branch: main
@@ -17,6 +17,9 @@ services:
         sync: false
       - key: BETTER_AUTH_SECRET
         sync: false
+      # MUST match this service's own public URL or auth callbacks break. If the
+      # service is recreated under a different name, update this to the new
+      # hostname (and the Google OAuth redirect URI) before signing in.
       - key: BETTER_AUTH_URL
         value: https://whitebored.onrender.com
       - key: CLIENT_ORIGIN
@@ -30,14 +33,9 @@ services:
       # Sketch-to-Notes: every AI feature routes through the central Gemini module.
       # Without a key the module returns null and notes/cards/chat/coverage all
       # degrade to "not configured" rather than erroring.
-      #
-      # GEMINI_API_KEY is deliberately NOT declared here. A `sync: false` entry added
-      # to an existing blueprint creates the row but leaves it empty until the
-      # blueprint change is applied, and that reconciliation can blank a value typed
-      # into the dashboard — which is exactly what happened: the app kept reading an
-      # empty key while the dashboard appeared to have one. Leaving it undeclared
-      # makes the Environment tab the single owner of that secret.
-      # Set GEMINI_API_KEY in the Render dashboard; verify with /healthz/config.
+      # Set the value in the dashboard; verify with /healthz/config.
+      - key: GEMINI_API_KEY
+        sync: false
       - key: GEMINI_MODEL
         value: gemini-3.6-flash
       - key: GEMINI_EMBED_MODEL
