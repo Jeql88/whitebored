@@ -1,6 +1,6 @@
 # Scope bar + chat-driven scoping with resolve-then-confirm (D19)
 
-Status: ready-for-agent
+Status: done
 Slice: 17
 
 ## Parent
