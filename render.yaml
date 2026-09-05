@@ -28,10 +28,16 @@ services:
       - key: GOOGLE_VISION_KEY
         sync: false
       # Sketch-to-Notes: every AI feature routes through the central Gemini module.
-      # Without this key the module returns null and notes/cards/chat/coverage all
-      # degrade to "not configured" rather than erroring — set it in the dashboard.
-      - key: GEMINI_API_KEY
-        sync: false
+      # Without a key the module returns null and notes/cards/chat/coverage all
+      # degrade to "not configured" rather than erroring.
+      #
+      # GEMINI_API_KEY is deliberately NOT declared here. A `sync: false` entry added
+      # to an existing blueprint creates the row but leaves it empty until the
+      # blueprint change is applied, and that reconciliation can blank a value typed
+      # into the dashboard — which is exactly what happened: the app kept reading an
+      # empty key while the dashboard appeared to have one. Leaving it undeclared
+      # makes the Environment tab the single owner of that secret.
+      # Set GEMINI_API_KEY in the Render dashboard; verify with /healthz/config.
       - key: GEMINI_MODEL
         value: gemini-3.6-flash
       - key: GEMINI_EMBED_MODEL
