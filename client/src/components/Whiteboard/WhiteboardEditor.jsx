@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   MessageSquare,
   MessagesSquare,
+  Sparkles,
   Link2,
   Check,
   Sun,
@@ -34,6 +35,7 @@ import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
 import CommentsSidebar from "./CommentsSidebar";
 import ChatBox from "../Chatbox";
+import ChatPanel from "./ChatPanel";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
 import SharePanel from "./SharePanel";
@@ -70,7 +72,9 @@ export default function WhiteboardEditor() {
 
   const [boardName, setBoardName] = useState("Untitled");
   const [collaborators, setCollaborators] = useState([]); // presence avatars
-  const [openPanel, setOpenPanel] = useState(null); // 'comments' | 'chat' | null
+  const [openPanel, setOpenPanel] = useState(null); // 'comments' | 'room' | 'aichat' | null
+  const [aiChat, setAiChat] = useState([]); // AI "Chat" tab transcript (slice #13)
+  const [aiPending, setAiPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [socket, setSocket] = useState(null);
   const [disconnected, setDisconnected] = useState(false);
@@ -424,6 +428,47 @@ export default function WhiteboardEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whiteboardId]);
 
+  // AI "Chat" tab (slice #13, D10/D11): listen for provenance-tagged replies from the
+  // server's AI-chat channel. Each reply's message carries its verified source tag
+  // (from your board / from a doc / general knowledge); the panel just renders it.
+  useEffect(() => {
+    if (!socket) return;
+    const onReply = ({ boardId, message }) => {
+      if (boardId !== whiteboardId || !message) return;
+      setAiPending(false);
+      setAiChat((prev) => [...prev, message]);
+    };
+    const onError = ({ boardId }) => {
+      if (boardId && boardId !== whiteboardId) return;
+      setAiPending(false);
+      setAiChat((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: "Sorry — I couldn't answer that just now.",
+          source: { bucket: "general", label: "general knowledge", addableToNotes: false },
+        },
+      ]);
+    };
+    socket.on("aiChatReply", onReply);
+    socket.on("aiChatError", onError);
+    return () => {
+      socket.off("aiChatReply", onReply);
+      socket.off("aiChatError", onError);
+    };
+  }, [socket, whiteboardId]);
+
+  const sendAiChat = useCallback(
+    (text) => {
+      const s = socketRef.current;
+      if (!s || !text?.trim()) return;
+      setAiChat((prev) => [...prev, { role: "user", text }]);
+      setAiPending(true);
+      s.emit("aiChatMessage", { boardId: whiteboardId, text });
+    },
+    [whiteboardId]
+  );
+
   const commitName = async () => {
     if (isGuest) return;
     try {
@@ -698,8 +743,11 @@ export default function WhiteboardEditor() {
         <button onClick={() => setOpenPanel(openPanel === "comments" ? null : "comments")} className={btn} title="Comments">
           <MessageSquare size={18} />
         </button>
-        <button onClick={() => setOpenPanel(openPanel === "chat" ? null : "chat")} className={btn} title="Chat">
+        <button onClick={() => setOpenPanel(openPanel === "room" ? null : "room")} className={btn} title="Room">
           <MessagesSquare size={18} />
+        </button>
+        <button onClick={() => setOpenPanel(openPanel === "aichat" ? null : "aichat")} className={btn} title="Chat">
+          <Sparkles size={18} />
         </button>
 
         {/* Share / copy link — opens share popup for signed-in users, just copies for guests */}
@@ -826,7 +874,7 @@ export default function WhiteboardEditor() {
             currentUserId={me.userId}
           />
         )}
-        {openPanel === "chat" && (
+        {openPanel === "room" && (
           <ChatBox
             socket={socket}
             userId={me.userId}
@@ -834,6 +882,17 @@ export default function WhiteboardEditor() {
             username={me.username}
             onClose={() => setOpenPanel(null)}
           />
+        )}
+        {openPanel === "aichat" && (
+          <div className="absolute inset-y-0 right-0 z-40">
+            <ChatPanel
+              variant="sheet"
+              messages={aiChat}
+              pending={aiPending}
+              onSend={sendAiChat}
+              onClose={() => setOpenPanel(null)}
+            />
+          </div>
         )}
       </div>
 

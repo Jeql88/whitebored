@@ -86,7 +86,7 @@ export default function ChatBox({ socket, userId, whiteboardId, username, onClos
         onMouseDown={startDrag}
         className="flex cursor-move select-none items-center justify-between border-b border-[var(--surface-border)] bg-[var(--surface-bg)] px-4 py-2.5"
       >
-        <span className="text-sm font-semibold text-[var(--surface-text)]">Chat</span>
+        <span className="text-sm font-semibold text-[var(--surface-text)]">Room</span>
         <button
           onClick={onClose}
           className="rounded-md p-1 text-[var(--surface-muted)] hover:bg-[var(--surface-card)]"

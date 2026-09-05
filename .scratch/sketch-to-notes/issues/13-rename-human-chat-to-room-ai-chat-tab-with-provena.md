@@ -1,6 +1,6 @@
 # Rename human chat to Room; AI Chat tab with provenance tags (D10, D11)
 
-Status: ready-for-agent
+Status: done
 Slice: 13
 
 ## Parent

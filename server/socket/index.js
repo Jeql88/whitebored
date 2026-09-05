@@ -8,9 +8,14 @@ const { registerNotesHandlers } = require("../notes/socketNotes");
 const { createNotesFromGemini } = require("../notes");
 const { createNotesStore } = require("../notes/store");
 const { createGeminiFromConfig } = require("../gemini");
+const { registerChatHandlers } = require("../aichat/socketChat");
+const { createChatResponder } = require("../aichat");
+const { createRetriever } = require("../retrieval");
+const { createChunkStore } = require("../retrieval/store");
+const { createDocumentStore } = require("../documents");
 const config = require("../config");
 const { canAccessBoard, getBoard, toObjectId } = require("../auth/boards");
-const { getCollections } = require("../db");
+const { getCollections, db } = require("../db");
 
 // Max simultaneous Socket.IO connections per IP — prevents a single client
 // from opening hundreds of sockets to inflate broadcast traffic or memory.
@@ -24,7 +29,65 @@ function initSocket(io) {
   // the central module; if no key is configured the generator is null and the
   // notes handler is simply not registered — the feature degrades gracefully
   // (mirrors the OCR route's 503 path) rather than crashing collab.
-  const notesGenerator = createNotesFromGemini(createGeminiFromConfig(config));
+  const gemini = createGeminiFromConfig(config);
+  const notesGenerator = createNotesFromGemini(gemini);
+
+  // AI-chat responder (D10/D11 — the "Chat" tab). Built once, gated on Gemini being
+  // configured (same graceful-degradation contract as notes: no key → no handler,
+  // collab still runs). The retriever is the retrieved-document-chunk context bucket
+  // (slice #12): it needs embeddings, so it is only wired when the client supports
+  // embed(). The chunk collection is accessed via the raw db handle WITHOUT adding an
+  // index in db.js (mirrors slice #11's lazy document access). If no chunks are
+  // indexed yet, retrieve() simply returns [] and the chat still answers from the
+  // board or general knowledge.
+  const chatResponder = (() => {
+    if (!gemini || typeof gemini.embed !== "function") return null;
+    try {
+      const documents = createDocumentStore({
+        bucket: new (require("mongodb").GridFSBucket)(db, { bucketName: "documents" }),
+        collection: db.collection("documents"),
+      });
+      const chunks = createChunkStore({ collection: db.collection("documentChunks") });
+      const retriever = createRetriever({ gemini, chunks, documents });
+      return createChatResponder({
+        gemini,
+        retrieve: (query, scope) => retriever.retrieve(query, scope),
+        documents,
+      });
+    } catch (err) {
+      console.error("[aichat] responder wiring failed, AI chat disabled:", err.message);
+      return null;
+    }
+  })();
+
+  // Flatten a board's stored text into the "board" context bucket for the AI chat:
+  // the persisted Notes artifact lines plus the board's extracted-text fields (the
+  // same fields the D20 search indexes). Read-only; degrades to "" on any miss so a
+  // chat still runs (and simply can't earn a board tag) when a board has no text yet.
+  async function boardTextFor(boardId) {
+    const parts = [];
+    try {
+      const notes = await getCollections().notes.findOne({ boardId });
+      if (notes && Array.isArray(notes.lines)) {
+        for (const line of notes.lines) {
+          if (line && typeof line.text === "string") parts.push(line.text);
+        }
+      }
+    } catch { /* no notes yet */ }
+    try {
+      const _id = toObjectId(boardId);
+      if (_id) {
+        const board = await getCollections().whiteboards.findOne(
+          { _id },
+          { projection: { transcriptionText: 1, typedLabelsText: 1, notesText: 1 } }
+        );
+        for (const f of ["transcriptionText", "typedLabelsText", "notesText"]) {
+          if (board && typeof board[f] === "string") parts.push(board[f]);
+        }
+      }
+    } catch { /* no board text yet */ }
+    return parts.join("\n");
+  }
 
   io.on("connection", (socket) => {
     // Connection cap per IP.
@@ -119,6 +182,17 @@ function initSocket(io) {
         generator: notesGenerator,
         store,
         canAccess: canAccessBoard,
+      });
+    }
+
+    // AI-chat channel (D10) — the "Chat" tab, separate from the human "Room" chat.
+    // Gated on the responder being wired (Gemini configured with embeddings); access
+    // rides the same canAccessBoard seam, board context through boardTextFor.
+    if (chatResponder) {
+      registerChatHandlers(socket, {
+        responder: chatResponder,
+        canAccess: canAccessBoard,
+        boardText: boardTextFor,
       });
     }
   });
