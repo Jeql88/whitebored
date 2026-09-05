@@ -17,6 +17,9 @@ const GOOGLE_VISION_KEY = process.env.GOOGLE_VISION_KEY || "";
 // central Gemini module has no real client and AI features degrade gracefully.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+// Retrieval embeddings (D14). Read here so the deployed value actually reaches
+// the client seam; realClient falls back to its own default when this is empty.
+const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "text-embedding-004";
 
 function requireVar(name, value) {
   if (!value) {
@@ -44,4 +47,5 @@ module.exports = {
   GOOGLE_VISION_KEY,
   GEMINI_API_KEY,
   GEMINI_MODEL,
+  GEMINI_EMBED_MODEL,
 };
