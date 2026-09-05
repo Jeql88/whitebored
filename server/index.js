@@ -22,6 +22,7 @@ const studyRoutes = require("./routes/study");
 const transcriptionRoutes = require("./routes/transcription");
 const adminRoutes = require("./routes/admin");
 const searchRoutes = require("./routes/search");
+const spaceRoutes = require("./routes/spaces");
 
 const app = express();
 // Railway terminates TLS at a proxy; trust it so req.ip reflects the real client
@@ -127,6 +128,7 @@ app.use("/api/whiteboards", cardRoutes());
 app.use("/api/whiteboards", studyRoutes());
 app.use("/api/whiteboards", transcriptionRoutes());
 app.use("/api/search", searchRoutes());
+app.use("/api/spaces", spaceRoutes());
 
 // Catch-all error handler — prevents unhandled Express errors from leaking stack traces.
 app.use((err, req, res, next) => {

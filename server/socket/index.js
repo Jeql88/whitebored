@@ -7,6 +7,7 @@ const { registerPresenceHandlers, getChatHistory } = require("./presence");
 const { registerNotesHandlers } = require("../notes/socketNotes");
 const { createNotesFromGemini } = require("../notes");
 const { createNotesStore } = require("../notes/store");
+const { createNotesRegenerator } = require("../notes/regenerate");
 const { createGeminiFromConfig } = require("../gemini");
 const { registerChatHandlers } = require("../aichat/socketChat");
 const { createChatResponder } = require("../aichat");
@@ -180,6 +181,9 @@ function initSocket(io) {
       const store = createNotesStore({ collection: getCollections().notes });
       registerNotesHandlers(socket, {
         generator: notesGenerator,
+        // Regeneration composes the same generator with the shared reconcile
+        // primitive, so it is wired wherever generation is (D7).
+        regenerator: createNotesRegenerator({ generator: notesGenerator }),
         store,
         canAccess: canAccessBoard,
       });

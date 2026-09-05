@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "../../lib/auth-client";
 import { io } from "socket.io-client";
 import {
@@ -95,6 +95,7 @@ function reconcileElements(local = [], incoming = []) {
 export default function WhiteboardEditor() {
   const { id: whiteboardId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { theme, toggleTheme } = useTheme();
 
   const [boardName, setBoardName] = useState("Untitled");
@@ -646,6 +647,27 @@ export default function WhiteboardEditor() {
     generateNotesFrom(transcript);
   }, [transcript, transcriptConfirmed, generateNotesFrom]);
 
+  // Regenerate over the EXISTING notes (D7): the server reconciles fresh output
+  // against what is stored, so a line the user edited survives and a line whose
+  // shapes were deleted retires. Distinct from a plain re-generate, which would
+  // discard those edits.
+  const regenerateNotes = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    if (!transcript || !transcriptConfirmed) {
+      return showToast("Read the board and confirm the transcription first.");
+    }
+    const api = apiRef.current;
+    setNotesBusy(true);
+    setNotesLines([]);
+    socket.emit("regenerateNotes", {
+      boardId: whiteboardId,
+      transcription: transcript,
+      noteType,
+      boardElementIds: api ? api.getSceneElements().map((el) => el.id) : [],
+    });
+  }, [whiteboardId, transcript, transcriptConfirmed, noteType]);
+
   // Click a note line → highlight the shapes it came from (story 9). The editor
   // already scrolls-to-content elsewhere; this reuses the same Excalidraw API.
   const highlightSources = useCallback((sourceElementIds) => {
@@ -829,6 +851,33 @@ export default function WhiteboardEditor() {
       showToast("Couldn't extract text. Try again.");
     }
   };
+
+  // The study route links back as /whiteboard/:id?highlight=id1,id2 when the user
+  // asks to see a card on the board (story 36). Consume it once the scene has
+  // elements, then strip it from the URL so a refresh does not re-trigger.
+  useEffect(() => {
+    const raw = searchParams.get("highlight");
+    if (!raw) return undefined;
+
+    // The scene arrives asynchronously (Excalidraw mounts, then the socket or the
+    // saved snapshot fills it), and there is no "scene ready" signal to hang this
+    // on — so wait for elements to exist, then highlight once and give up after a
+    // few seconds rather than polling forever on a board that is genuinely empty.
+    const deadline = Date.now() + 5000;
+    const timer = setInterval(() => {
+      const api = apiRef.current;
+      const ready = api && api.getSceneElements().length > 0;
+      if (!ready && Date.now() < deadline) return;
+
+      clearInterval(timer);
+      if (ready) highlightSources(raw.split(",").filter(Boolean));
+      const next = new URLSearchParams(searchParams);
+      next.delete("highlight");
+      setSearchParams(next, { replace: true });
+    }, 200);
+
+    return () => clearInterval(timer);
+  }, [searchParams, setSearchParams, highlightSources]);
 
   // --- Documents (D13) ------------------------------------------------------
 
@@ -1328,6 +1377,7 @@ export default function WhiteboardEditor() {
             noteType={noteType}
             onNoteTypeChange={setNoteType}
             onGenerateNotes={generateNotes}
+            onRegenerateNotes={regenerateNotes}
             notesLines={notesLines}
             notesBusy={notesBusy}
             onHighlight={highlightSources}

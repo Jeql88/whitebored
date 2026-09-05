@@ -45,6 +45,7 @@ export default function StudioSidebar({
   noteType,
   onNoteTypeChange,
   onGenerateNotes,
+  onRegenerateNotes,
   notesLines,
   notesBusy,
   onHighlight,
@@ -195,6 +196,18 @@ export default function StudioSidebar({
               </div>
             )}
 
+            {notesLines.length > 0 && (
+              <div className="border-b border-[var(--surface-border)] px-3 pb-3">
+                <button
+                  type="button"
+                  onClick={() => onRegenerateNotes?.()}
+                  className="w-full rounded border border-[var(--surface-border)] px-3 py-1.5 text-xs font-medium text-[var(--surface-text)] hover:bg-[var(--surface-hover)]"
+                >
+                  Regenerate (keeps your edits)
+                </button>
+              </div>
+            )}
+
             {(transcriptConfirmed || notesLines.length > 0) && (
               <NotesPanel
                 variant="docked"
@@ -307,6 +320,7 @@ StudioSidebar.propTypes = {
   noteType: PropTypes.string,
   onNoteTypeChange: PropTypes.func,
   onGenerateNotes: PropTypes.func,
+  onRegenerateNotes: PropTypes.func,
   notesLines: PropTypes.array,
   notesBusy: PropTypes.bool,
   onHighlight: PropTypes.func,

@@ -498,3 +498,68 @@ test("addChatToNotes refuses a general-knowledge answer — nothing is persisted
   // The server re-checks provenance rather than trusting the client's emit.
   assert.deepEqual(saved, []);
 });
+
+// --- regenerateNotes over the socket (slice #7 wiring) -----------------------
+
+test("regenerateNotes reconciles against the stored notes and persists the result", async () => {
+  const saved = [];
+  // A prior line the user edited by hand — regeneration must not clobber it.
+  const prior = {
+    boardId: "b1",
+    noteType: "lecture",
+    lines: [
+      { text: "one point", kind: "key-point", sourceElementIds: ["f0"], origin: "board", userEdited: true },
+    ],
+  };
+  const store = {
+    load: async () => prior,
+    save: async (r) => { saved.push(r); return r; },
+  };
+
+  let sawPrior = null;
+  const regenerator = {
+    regenerate: async ({ prior: p, onLine }) => {
+      sawPrior = p;
+      const line = { text: "one point", kind: "key-point", sourceElementIds: ["f0"], origin: "board", userEdited: true };
+      onLine?.(line);
+      return { boardId: "b1", noteType: "lecture", lines: [line] };
+    },
+  };
+
+  const socket = fakeSocket();
+  registerNotesHandlers(socket, {
+    generator: { generate: async () => ({ boardId: "b1", lines: [] }) },
+    regenerator,
+    store,
+  });
+
+  await socket.fire("regenerateNotes", {
+    boardId: "b1",
+    transcription: "one point two point",
+    noteType: "lecture",
+    boardElementIds: ["f0"],
+  });
+
+  // The stored lines are handed to the regenerator as `prior` — that is what makes
+  // "protect what's yours" work across a regeneration.
+  assert.deepEqual(sawPrior, prior.lines);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].lines[0].userEdited, true);
+
+  // Surviving lines stream, then the persisted record lands.
+  assert.ok(socket.emitted.some((e) => e.event === "notesLine"));
+  assert.ok(socket.emitted.some((e) => e.event === "notesDone"));
+});
+
+test("regenerateNotes without a regenerator wired reports an error rather than hanging", async () => {
+  const socket = fakeSocket();
+  registerNotesHandlers(socket, {
+    generator: { generate: async () => ({ boardId: "b1", lines: [] }) },
+    store: { load: async () => null, save: async (r) => r },
+  });
+
+  await socket.fire("regenerateNotes", { boardId: "b1", transcription: "x" });
+
+  const err = socket.emitted.find((e) => e.event === "notesError");
+  assert.ok(err, "expected notesError when no regenerator is configured");
+});

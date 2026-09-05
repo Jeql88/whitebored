@@ -13,6 +13,7 @@ const { lineFromChatMessage } = require("./fromChat");
 // It listens for one client event and emits three:
 //   in:  "generateNotes"  { boardId, transcription, noteType }
 //   in:  "addChatToNotes" { boardId, text, bucket, sourceElementIds, citation }
+//   in:  "regenerateNotes" { boardId, transcription, noteType, boardElementIds }
 //   out: "notesLine"      { boardId, line }     one per VERIFIED line, as ready
 //        "notesDone"      { boardId, record }   the persisted record, when complete
 //        "notesError"     { boardId, error }    on an unexpected failure
@@ -30,7 +31,7 @@ const { lineFromChatMessage } = require("./fromChat");
 // fakes; the production wiring in socket/index.js passes the real generator, store,
 // and access check.
 
-function registerNotesHandlers(socket, { generator, store, canAccess } = {}) {
+function registerNotesHandlers(socket, { generator, regenerator, store, canAccess } = {}) {
   if (!generator || typeof generator.generate !== "function") {
     throw new Error("registerNotesHandlers: a notes generator is required");
   }
@@ -78,6 +79,55 @@ function registerNotesHandlers(socket, { generator, store, canAccess } = {}) {
       // client rather than leaving it spinning.
       console.error("[notes] generation failed:", err.message);
       socket.emit("notesError", { boardId, error: "generation_failed" });
+    }
+  });
+
+  // Regenerate notes over an existing artifact (slice #7, D7). The difference from
+  // generateNotes is the whole point: the stored lines are handed back as `prior`,
+  // so a line the user edited survives, a line whose shapes were deleted retires,
+  // and only genuinely new content is added. Streaming still carries verified
+  // lines, but a fresh line streams only once it has SURVIVED reconciliation.
+  socket.on("regenerateNotes", async (payload = {}) => {
+    const { boardId, transcription, noteType, boardElementIds } = payload;
+    if (!boardId) return;
+
+    if (typeof canAccess === "function") {
+      const ok = await canAccess(socket.user, boardId).catch(() => false);
+      const allowed = ok === true || (ok && ok.allowed === true);
+      if (!allowed) {
+        socket.emit("notesError", { boardId, error: "forbidden" });
+        return;
+      }
+    }
+
+    if (!regenerator || typeof regenerator.regenerate !== "function") {
+      // Fail loud rather than leaving the client spinning on a button that can
+      // never complete.
+      socket.emit("notesError", { boardId, error: "regeneration_unavailable" });
+      return;
+    }
+
+    try {
+      const existing = store && typeof store.load === "function" ? await store.load(boardId) : null;
+      const record = await regenerator.regenerate({
+        transcription,
+        noteType: noteType || existing?.noteType,
+        boardId,
+        prior: existing?.lines || [],
+        boardElementIds: Array.isArray(boardElementIds) ? boardElementIds : [],
+        userId: socket.user?.userId,
+        onLine: (line) => socket.emit("notesLine", { boardId, line }),
+      });
+
+      if (store && typeof store.save === "function") {
+        await store.save(record).catch((err) => {
+          console.error("[notes] persist failed:", err.message);
+        });
+      }
+      socket.emit("notesDone", { boardId, record });
+    } catch (err) {
+      console.error("[notes] regeneration failed:", err.message);
+      socket.emit("notesError", { boardId, error: "regeneration_failed" });
     }
   });
 
