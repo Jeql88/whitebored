@@ -1,3 +1,15 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "build": {
+    "env": {
+      "VITE_API_BASE": "https://whitebored-wl8r.onrender.com",
+      "VITE_SOCKET_BASE": "https://whitebored-wl8r.onrender.com"
+    }
+  }
 }

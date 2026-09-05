@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: whitebored
+    name: whitebored-wl8r
     runtime: node
     plan: free
     branch: main
@@ -21,7 +21,7 @@ services:
       # service is recreated under a different name, update this to the new
       # hostname (and the Google OAuth redirect URI) before signing in.
       - key: BETTER_AUTH_URL
-        value: https://whitebored.onrender.com
+        value: https://whitebored-wl8r.onrender.com
       - key: CLIENT_ORIGIN
         value: https://whitebored-client.vercel.app
       - key: RESEND_API_KEY
