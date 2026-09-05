@@ -53,7 +53,7 @@ describe("StudioSidebar", () => {
     expect(screen.getByRole("tab", { name: /documents/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: /notes/i })).toHaveAttribute("aria-selected", "false");
     // The notes panel is not merely hidden — it is not rendered at all.
-    expect(screen.queryByRole("region", { name: /^notes$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: /^notes$/i })).not.toBeInTheDocument();
   });
 
   it("reports the selected tab when another is clicked", async () => {
@@ -91,5 +91,57 @@ describe("StudioSidebar", () => {
     await userEvent.keyboard("{Escape}");
 
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+// The Notes tab is the Phase-1 → Phase-2 flow (D3). The gate is the point: notes
+// must not be reachable until the user has seen and confirmed what was read.
+describe("StudioSidebar — transcription gate", () => {
+  const artifact = (hasUnclear) => ({
+    phase: "transcription",
+    hasUnclear,
+    entries: [
+      {
+        cropId: "c1",
+        segments: [
+          { text: "Mitosis has four phases", uncertain: false },
+          ...(hasUnclear ? [{ text: "", uncertain: true }] : []),
+        ],
+        sourceElementIds: ["s1"],
+        bbox: { x: 0, y: 0, width: 10, height: 10 },
+      },
+    ],
+  });
+
+  it("invites the user to read the board before anything has been transcribed", () => {
+    renderSidebar({ activeTab: "notes" });
+
+    expect(screen.getByRole("button", { name: /read the board/i })).toBeInTheDocument();
+    // No review and no notes yet — nothing to correct or generate from.
+    expect(screen.queryByRole("region", { name: /transcription review/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the review step once the board is read, before any notes exist", () => {
+    renderSidebar({ activeTab: "notes", transcript: artifact(true), transcriptConfirmed: false });
+
+    expect(screen.getByRole("region", { name: /transcription review/i })).toBeInTheDocument();
+    // Notes are NOT reachable while the transcription is unconfirmed.
+    expect(screen.queryByRole("complementary", { name: /^notes$/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the notes panel once the transcription is confirmed", () => {
+    renderSidebar({ activeTab: "notes", transcript: artifact(false), transcriptConfirmed: true });
+
+    expect(screen.getByRole("complementary", { name: /^notes$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /transcription review/i })).not.toBeInTheDocument();
+  });
+
+  it("asks to re-read once a transcription exists, so a changed board can be re-read", async () => {
+    const onTranscribe = vi.fn();
+    renderSidebar({ activeTab: "notes", transcript: artifact(false), transcriptConfirmed: true, onTranscribe });
+
+    await userEvent.click(screen.getByRole("button", { name: /re-read the board/i }));
+
+    expect(onTranscribe).toHaveBeenCalled();
   });
 });

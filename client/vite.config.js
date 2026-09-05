@@ -11,6 +11,20 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
   },
+  // The crop-grouping module is shared with the server (pure, dependency-free) so
+  // the client and the recognizer cannot disagree about what a crop is. It is
+  // CommonJS and lives OUTSIDE this workspace root, so Rollup skips its usual
+  // CJS interop for it; including it here applies the transform and makes its
+  // `module.exports` importable as a default binding.
+  build: {
+    commonjsOptions: {
+      include: [/server[\/]recognition/, /node_modules/],
+    },
+  },
+  // Vite refuses to serve files above the project root in dev unless allowed.
+  server: {
+    fs: { allow: [".."] },
+  },
   // Component/behaviour tests run in jsdom via Vitest (see client tests, e.g.
   // src/components/**/*.test.jsx). globals:true so tests read like the server
   // suite (bare test/expect); the setup file registers jest-dom matchers and

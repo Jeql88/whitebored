@@ -50,6 +50,9 @@ import {
   runCoverage,
   getScope,
   saveScope,
+  transcribeBoard,
+  getTranscription,
+  saveTranscription,
 } from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
@@ -57,6 +60,7 @@ import CommentsSidebar from "./CommentsSidebar";
 import ChatPanel from "./ChatPanel";
 import { addToNotesPayload } from "../../utils/addToNotes";
 import { extractPdfPageTexts, hasTextLayer } from "../../utils/pdfText";
+import { buildBoardCrops } from "../../utils/boardCrops";
 import StudioSidebar from "./StudioSidebar";
 import { appendLine } from "../../utils/notesArtifact";
 import Minimap from "./Minimap";
@@ -104,7 +108,11 @@ export default function WhiteboardEditor() {
   const [notesLines, setNotesLines] = useState([]);
   const [noteType, setNoteType] = useState("lecture");
   const [notesBusy, setNotesBusy] = useState(false);
-  const [transcription, setTranscription] = useState("");
+  // The phase-1 artifact under review. Notes are gated behind confirming it
+  // (D3): Phase 2 runs on corrected text, never on the raw read.
+  const [transcript, setTranscript] = useState(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcriptConfirmed, setTranscriptConfirmed] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [activeDoc, setActiveDoc] = useState(null);
   const [activePage, setActivePage] = useState(1);
@@ -560,18 +568,83 @@ export default function WhiteboardEditor() {
     };
   }, [whiteboardId]);
 
-  // Generate notes from the reviewed transcription. Phase 2 runs only on text the
-  // user has seen (D3), so we require a transcription rather than silently OCRing.
-  const generateNotes = useCallback(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    if (!transcription.trim()) {
-      return showToast("Extract text from the board first, then generate notes.");
+  // Phase 1 (D3/D4): read the board into a STRUCTURED artifact — per-crop segments
+  // with explicit [unclear] gaps — which the user reviews and corrects before any
+  // notes exist. Grouping + rasterizing happen here because the browser is what
+  // renders Excalidraw; the model call happens server-side through recognize().
+  const transcribeNow = useCallback(async () => {
+    const api = apiRef.current;
+    if (!api) return;
+    const els = api.getSceneElements();
+    if (!els.length) return showToast("Nothing on the board to read yet.");
+
+    setTranscribing(true);
+    showToast("Reading your board…");
+    try {
+      const crops = await buildBoardCrops(els, api.getFiles());
+      if (!crops.length) {
+        setTranscribing(false);
+        return showToast("Nothing readable found on the board.");
+      }
+      const result = await transcribeBoard(whiteboardId, crops);
+      if (result?.error) {
+        setTranscribing(false);
+        return showToast(result.error);
+      }
+      setTranscript(result.artifact);
+      setTranscriptConfirmed(false);
+      showToast("Check what was read, then confirm to generate notes.");
+    } catch {
+      showToast("Couldn't read the board. Try again.");
+    } finally {
+      setTranscribing(false);
     }
-    setNotesLines([]);
-    setNotesBusy(true);
-    socket.emit("generateNotes", { boardId: whiteboardId, transcription, noteType });
-  }, [whiteboardId, transcription, noteType]);
+  }, [whiteboardId]);
+
+  // Persist each correction as it happens, so a reload does not lose the user's
+  // fixes and Phase 2 always reads the corrected artifact.
+  const correctTranscript = useCallback(
+    (artifact) => {
+      setTranscript(artifact);
+      saveTranscription(whiteboardId, artifact).catch(() => {});
+    },
+    [whiteboardId]
+  );
+
+  // Confirming the gate is what unlocks notes (D3).
+  const confirmTranscript = useCallback(
+    (artifact) => {
+      setTranscript(artifact);
+      setTranscriptConfirmed(true);
+      saveTranscription(whiteboardId, artifact).catch(() => {});
+      generateNotesFrom(artifact);
+    },
+    // generateNotesFrom is defined below and stable; see its own deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [whiteboardId]
+  );
+
+  // Phase 2 (D3): notes generate ONLY from a confirmed artifact. Taking it as an
+  // argument means the confirm handler can pass the freshly corrected version
+  // without waiting for a state round-trip.
+  const generateNotesFrom = useCallback(
+    (artifact) => {
+      const socket = socketRef.current;
+      if (!socket || !artifact) return;
+      setNotesLines([]);
+      setNotesBusy(true);
+      socket.emit("generateNotes", { boardId: whiteboardId, transcription: artifact, noteType });
+    },
+    [whiteboardId, noteType]
+  );
+
+  // Regenerate from the already-confirmed artifact (the Notes panel's own button).
+  const generateNotes = useCallback(() => {
+    if (!transcript || !transcriptConfirmed) {
+      return showToast("Read the board and confirm the transcription first.");
+    }
+    generateNotesFrom(transcript);
+  }, [transcript, transcriptConfirmed, generateNotesFrom]);
 
   // Click a note line → highlight the shapes it came from (story 9). The editor
   // already scrolls-to-content elsewhere; this reuses the same Excalidraw API.
@@ -752,9 +825,6 @@ export default function WhiteboardEditor() {
       if (result.error) return showToast(result.error);
       if (!result.words) return showToast("No text detected.");
       setOcrResult(result.text);
-      // The extracted text is Phase 1's transcription: notes generate only from
-      // text the user has seen (D3), so we hold it here for the Notes panel.
-      setTranscription(result.text);
     } catch {
       showToast("Couldn't extract text. Try again.");
     }
@@ -839,6 +909,24 @@ export default function WhiteboardEditor() {
   );
 
   // --- Fact-check, coverage, scope ------------------------------------------
+
+  // Restore a stored transcription so a reload returns to where the user was —
+  // re-reading the board would cost another model call. An artifact with no gaps
+  // left is treated as already reviewed.
+  useEffect(() => {
+    if (isGuest) return undefined;
+    let cancelled = false;
+    getTranscription(whiteboardId)
+      .then((r) => {
+        if (cancelled || !r?.artifact) return;
+        setTranscript(r.artifact);
+        setTranscriptConfirmed(!r.artifact.hasUnclear);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [whiteboardId, isGuest]);
 
   // Scope persists per board (D19), so restore it rather than resetting the bar
   // to defaults on every reload.
@@ -1231,6 +1319,12 @@ export default function WhiteboardEditor() {
             activeTab={studioTab}
             onTabChange={setStudioTab}
             onClose={() => setOpenPanel(null)}
+            transcript={transcript}
+            transcriptConfirmed={transcriptConfirmed}
+            transcribing={transcribing}
+            onTranscribe={transcribeNow}
+            onCorrectTranscript={correctTranscript}
+            onConfirmTranscript={confirmTranscript}
             noteType={noteType}
             onNoteTypeChange={setNoteType}
             onGenerateNotes={generateNotes}

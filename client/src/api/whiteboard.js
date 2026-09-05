@@ -186,3 +186,20 @@ export function getScope(id) {
 export function saveScope(id, scope) {
   return apiFetch(`${WB}/${id}/scope`, { method: "PUT", body: { scope } });
 }
+
+// --- Phase-1 transcription (D3/D4) -----------------------------------------
+
+// Read the board: the client groups + rasterizes crops, the server runs them
+// through recognize() and returns the structured artifact the review UI corrects.
+export function transcribeBoard(id, crops) {
+  return apiFetch(`${WB}/${id}/transcription`, { method: "POST", body: { crops } });
+}
+
+export function getTranscription(id) {
+  return apiFetch(`${WB}/${id}/transcription`);
+}
+
+// Persist the user's corrections — notes generate from THIS, not the raw read.
+export function saveTranscription(id, artifact) {
+  return apiFetch(`${WB}/${id}/transcription`, { method: "PUT", body: { artifact } });
+}

@@ -3,6 +3,7 @@ import PropTypes from "prop-types";
 import { NotebookPen, Sparkles, FileText, ShieldCheck, Target, X } from "lucide-react";
 
 import NotesPanel from "./NotesPanel";
+import TranscriptionReview from "./TranscriptionReview";
 import ChatPanel from "./ChatPanel";
 import DocumentsPanel from "./DocumentsPanel";
 import FactCheckPanel from "./FactCheckPanel";
@@ -35,6 +36,12 @@ export default function StudioSidebar({
   onTabChange,
   onClose,
   variant = "docked",
+  transcript,
+  transcriptConfirmed,
+  transcribing,
+  onTranscribe,
+  onCorrectTranscript,
+  onConfirmTranscript,
   noteType,
   onNoteTypeChange,
   onGenerateNotes,
@@ -163,15 +170,50 @@ export default function StudioSidebar({
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {activeTab === "notes" && (
-          <NotesPanel
-            variant="docked"
-            noteType={noteType}
-            onNoteTypeChange={onNoteTypeChange}
-            onGenerate={onGenerateNotes}
-            lines={notesLines}
-            generating={notesBusy}
-            onHighlight={onHighlight}
-          />
+          <>
+            {/* Phase 1 (D3): read the board, then review what was read. Notes stay
+                gated behind confirming this — a misread is caught here rather than
+                propagating into the notes. */}
+            <div className="border-b border-[var(--surface-border)] p-3">
+              <button
+                type="button"
+                onClick={() => onTranscribe?.()}
+                disabled={transcribing}
+                className="w-full rounded bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {transcribing ? "Reading your board…" : transcript ? "Re-read the board" : "Read the board"}
+              </button>
+            </div>
+
+            {transcript && !transcriptConfirmed && (
+              <div className="p-3">
+                <TranscriptionReview
+                  artifact={transcript}
+                  onCorrect={onCorrectTranscript}
+                  onConfirm={onConfirmTranscript}
+                />
+              </div>
+            )}
+
+            {(transcriptConfirmed || notesLines.length > 0) && (
+              <NotesPanel
+                variant="docked"
+                noteType={noteType}
+                onNoteTypeChange={onNoteTypeChange}
+                onGenerate={onGenerateNotes}
+                lines={notesLines}
+                generating={notesBusy}
+                onHighlight={onHighlight}
+              />
+            )}
+
+            {!transcript && !notesLines.length && (
+              <p className="p-3 text-xs text-[var(--surface-muted)]">
+                Read the board to see what was recognized. You can fix any misreads
+                before notes are written from it.
+              </p>
+            )}
+          </>
         )}
         {activeTab === "chat" && (
           <ChatPanel
@@ -256,6 +298,12 @@ StudioSidebar.propTypes = {
   onTabChange: PropTypes.func,
   onClose: PropTypes.func,
   variant: PropTypes.oneOf(["docked", "sheet"]),
+  transcript: PropTypes.object,
+  transcriptConfirmed: PropTypes.bool,
+  transcribing: PropTypes.bool,
+  onTranscribe: PropTypes.func,
+  onCorrectTranscript: PropTypes.func,
+  onConfirmTranscript: PropTypes.func,
   noteType: PropTypes.string,
   onNoteTypeChange: PropTypes.func,
   onGenerateNotes: PropTypes.func,

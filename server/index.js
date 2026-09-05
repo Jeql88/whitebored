@@ -19,6 +19,7 @@ const ocrRoutes = require("./routes/ocr");
 const documentRoutes = require("./routes/documents");
 const cardRoutes = require("./routes/cards");
 const studyRoutes = require("./routes/study");
+const transcriptionRoutes = require("./routes/transcription");
 const adminRoutes = require("./routes/admin");
 const searchRoutes = require("./routes/search");
 
@@ -124,6 +125,7 @@ app.use("/api/whiteboards", ocrRoutes());
 app.use("/api/whiteboards", documentRoutes());
 app.use("/api/whiteboards", cardRoutes());
 app.use("/api/whiteboards", studyRoutes());
+app.use("/api/whiteboards", transcriptionRoutes());
 app.use("/api/search", searchRoutes());
 
 // Catch-all error handler — prevents unhandled Express errors from leaking stack traces.
