@@ -3,7 +3,15 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+// Stamp the build so a stale deploy is visible instead of being mistaken for a
+// bug in the app. Vercel exposes the commit sha; falls back to a timestamp locally.
+const BUILD_ID =
+  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ||
+  process.env.GIT_COMMIT?.slice(0, 7) ||
+  new Date().toISOString().slice(0, 16);
+
 export default defineConfig({
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [react(), tailwindcss()],
   // Keep a single React instance. The workspace has React 19 both at the root and
   // in this client; deduping guards component tests (and dev) against loading two
