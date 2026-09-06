@@ -116,7 +116,9 @@ module.exports = function transcriptionRoutes() {
         { $set: { boardId: req.params.id, transcription: artifact, updatedAt: new Date() } },
         { upsert: true }
       );
-      res.json({ artifact });
+      // Surface a read failure to the client: it is the difference between
+      // "your writing was not legible" and "the read did not happen".
+      res.json({ artifact, readFailure: artifact.readFailure || null });
     } catch (err) {
       // Surface the real cause. A generic 500 here is unactionable: the model call,
       // the JSON parse and the Mongo upsert can all fail, and from the client they

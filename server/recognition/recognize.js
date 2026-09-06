@@ -114,6 +114,9 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
     const inkCrops = crops.filter((c) => c.kind !== "text");
 
     // Typed text is ground truth: verbatim single certain segment, no model call.
+    // Set when the batch call itself failed, as opposed to the model genuinely
+    // being unable to read a crop. The two look identical in the output otherwise.
+    let readFailure = null;
     const readings = new Map();
     for (const crop of textCrops) {
       readings.set(crop.cropId, {
@@ -136,6 +139,10 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
       try {
         byCropId = parseBatch(await textOf(await gemini.generate(buildRequest(userId, inkCrops))));
       } catch (err) {
+        // Record why, so the caller can tell the user "the read failed" instead of
+        // silently showing [unclear] everywhere, which looks like the AI simply
+        // could not read their handwriting.
+        readFailure = err.message || String(err);
         // Log the crop sizes with the failure: "Unable to process input image"
         // means the model rejected one of these, and the dimensions are what
         // distinguishes a too-small crop from a malformed one.
@@ -156,8 +163,12 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
       }
     }
 
-    // Preserve caller order so downstream (transcription review) is stable.
-    return crops.map((c) => readings.get(c.cropId));
+    // Preserve caller order so downstream (transcription review) is stable. The
+    // failure reason rides alongside rather than in the array, so every existing
+    // caller keeps indexing readings exactly as before.
+    const out = crops.map((c) => readings.get(c.cropId));
+    out.readFailure = readFailure;
+    return out;
   }
 
   return { recognize };

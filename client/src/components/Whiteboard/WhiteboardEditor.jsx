@@ -629,6 +629,12 @@ export default function WhiteboardEditor() {
       showToast(result.reason || result.error);
       return null;
     }
+    // A failed read shows [unclear] on every crop, which is indistinguishable from
+    // genuinely illegible handwriting. Say which it was.
+    if (result.readFailure) {
+      console.error("[whitebored] board read failed:", result.readFailure);
+      showToast("Couldn't read the drawings — see console for details.");
+    }
     return result.artifact;
   }, [whiteboardId]);
 

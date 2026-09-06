@@ -71,7 +71,13 @@ function createTranscriber({ recognizer, gemini, userId: defaultUserId } = {}) {
 
     // No `notes` key: Phase 1 stops before notes on purpose (D3). Downstream reads
     // `phase` to know this artifact is not yet a notes document.
-    return { phase: "transcription", hasUnclear, entries };
+    //
+    // readFailure distinguishes "the model could not read your handwriting" from
+    // "the read never happened". Both produce [unclear] everywhere, and telling the
+    // user their writing was illegible when the request actually failed is a lie.
+    const artifact = { phase: "transcription", hasUnclear, entries };
+    if (readings.readFailure) artifact.readFailure = readings.readFailure;
+    return artifact;
   }
 
   return { transcribe };

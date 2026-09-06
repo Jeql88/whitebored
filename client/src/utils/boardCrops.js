@@ -26,12 +26,23 @@ async function cropImage(elements, files) {
     files,
     mimeType: "image/png",
     appState: { exportBackground: true, viewBackgroundColor: "#ffffff" },
-    exportPadding: 8,
+    exportPadding: 16,
     getDimensions: (w, h) => {
-      // Small handwriting reads poorly; scale up to a legible minimum without
-      // ballooning the request past what a multi-image call can carry.
-      const scale = Math.min(3, Math.max(1, 600 / Math.max(w, h)));
-      return { width: w * scale, height: h * scale, scale };
+      // The vision model rejects very small images outright ("Unable to process
+      // input image"), and a single short stroke can be only tens of pixels wide.
+      // The old 3x cap left such a crop around 120px and it was refused — so scale
+      // to a real MINIMUM edge rather than a fixed multiple, while capping the
+      // long edge so a batch of images stays within one request.
+      const longest = Math.max(w, h);
+      const shortest = Math.max(1, Math.min(w, h));
+      const upToMinimum = 320 / shortest; // guarantee a readable short edge
+      const downToMaximum = 1600 / longest; // keep the payload sane
+      const scale = Math.max(1, Math.min(upToMinimum, downToMaximum));
+      return {
+        width: Math.max(64, Math.round(w * scale)),
+        height: Math.max(64, Math.round(h * scale)),
+        scale,
+      };
     },
   });
 
