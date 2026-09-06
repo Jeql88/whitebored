@@ -3,7 +3,6 @@ import PropTypes from "prop-types";
 import { NotebookPen, Sparkles, FileText, X } from "lucide-react";
 
 import NotesDocument from "./NotesDocument";
-import TranscriptionReview from "./TranscriptionReview";
 import ChatPanel from "./ChatPanel";
 import DocumentsPanel from "./DocumentsPanel";
 import ScopeBar from "./ScopeBar";
@@ -37,11 +36,8 @@ export default function StudioSidebar({
   onClose,
   variant = "docked",
   transcript,
-  transcriptConfirmed,
   transcribing,
   onReread,
-  onCorrectTranscript,
-  onConfirmTranscript,
   onGenerateNotes,
   onRegenerateNotes,
   notesLines,
@@ -199,21 +195,6 @@ export default function StudioSidebar({
               )}
             </div>
 
-            {/* Only shown when the read left gaps — otherwise it never interrupts. */}
-            {transcript && !transcriptConfirmed && (
-              <div className="border-b border-[var(--surface-border)] p-3">
-                <p className="mb-2 text-[11px] text-[var(--surface-muted)]">
-                  Some words could not be read. Fill them in and notes will be
-                  written from your corrections.
-                </p>
-                <TranscriptionReview
-                  artifact={transcript}
-                  onCorrect={onCorrectTranscript}
-                  onConfirm={onConfirmTranscript}
-                />
-              </div>
-            )}
-
             {notesBusy && notesLines.length === 0 && (
               <p role="status" className="px-3 py-2 text-[11px] text-[var(--surface-muted)]">
                 Writing your notes…
@@ -289,11 +270,8 @@ StudioSidebar.propTypes = {
   onClose: PropTypes.func,
   variant: PropTypes.oneOf(["docked", "sheet"]),
   transcript: PropTypes.object,
-  transcriptConfirmed: PropTypes.bool,
   transcribing: PropTypes.bool,
   onReread: PropTypes.func,
-  onCorrectTranscript: PropTypes.func,
-  onConfirmTranscript: PropTypes.func,
   onGenerateNotes: PropTypes.func,
   onRegenerateNotes: PropTypes.func,
   notesLines: PropTypes.array,

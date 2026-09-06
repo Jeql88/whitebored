@@ -118,10 +118,12 @@ test("illegible ink is a first-class [unclear] gap, preserved verbatim and marke
   assert.equal(gap.uncertain, true);
 });
 
-test("an uncertain gap is never silently dropped or overwritten with a guess (story 6/7)", async () => {
+test("an unread crop contributes no text, and never a guess (story 7)", async () => {
   const stub = createGeminiStub();
-  // The model omits c2 entirely — the recognize seam surfaces it as an [unclear]
-  // gap; the artifact must carry that gap, not drop the crop.
+  // The model omits c2 entirely. The crop stays in the artifact — its shapes are
+  // never lost — but carries no text, so nothing unread reaches the notes. The
+  // review step that once asked the user to fill it in is gone; what must still
+  // hold is that a gap is never papered over with an invented reading.
   stub.enqueue(modelResponse({ c1: { segments: [{ text: "seen", uncertain: false }] } }));
   const transcriber = makeTranscriber(stub);
 
@@ -129,10 +131,10 @@ test("an uncertain gap is never silently dropped or overwritten with a guess (st
 
   const byId = Object.fromEntries(artifact.entries.map((e) => [e.cropId, e]));
   assert.ok(byId.c2, "the unread crop is still in the artifact, not dropped");
-  assert.equal(byId.c2.segments.length, 1);
-  assert.equal(byId.c2.segments[0].uncertain, true);
-  // Any-uncertain rollup lets the review UI badge the artifact without re-scanning.
-  assert.equal(artifact.hasUnclear, true);
+  assert.deepEqual(byId.c2.segments, []);
+  assert.deepEqual(byId.c2.sourceElementIds, ["f2"]);
+  // What was read is untouched.
+  assert.equal(byId.c1.segments[0].text, "seen");
 });
 
 test("a fully certain transcription reports hasUnclear:false", async () => {

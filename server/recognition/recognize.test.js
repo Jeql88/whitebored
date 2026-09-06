@@ -119,7 +119,7 @@ test("no crops → no model call, empty result", async () => {
   assert.equal(stub.calls.length, 0);
 });
 
-test("an ink crop the model omits comes back as an [unclear] gap, never dropped (story 6/7)", async () => {
+test("an ink crop the model omits yields no text, and never a placeholder", async () => {
   const stub = createGeminiStub();
   // Model answers c1 but says nothing about c2.
   stub.enqueue(modelResponse({ c1: { segments: [{ text: "seen", uncertain: false }] } }));
@@ -128,9 +128,13 @@ test("an ink crop the model omits comes back as an [unclear] gap, never dropped 
   const out = await recognizer.recognize([inkCrop("c1", ["f1"]), inkCrop("c2", ["f2"])]);
 
   const byId = Object.fromEntries(out.map((r) => [r.cropId, r]));
+  // The crop is still REPORTED (its shapes are never lost, story 7) — it simply
+  // carries no text, so nothing unread can reach the notes as "[unclear]" noise.
   assert.ok(byId.c2, "the unread crop is still returned, not dropped");
-  assert.equal(byId.c2.segments.length, 1);
-  assert.equal(byId.c2.segments[0].uncertain, true);
+  assert.deepEqual(byId.c2.segments, []);
+  assert.deepEqual(byId.c2.sourceElementIds, ["f2"]);
+  // What WAS read is unaffected.
+  assert.equal(byId.c1.segments[0].text, "seen");
 });
 
 test("a deferred (throttled) model call still resolves to a reading (story 56)", async () => {
@@ -181,7 +185,7 @@ test("an ink crop is sent as inlineData the API accepts, not a raw data URL", as
   assert.ok(!parts.some((p) => "image" in p), "no part should use the invalid `image` key");
 });
 
-test("a failed batch call degrades every ink crop to [unclear], not a thrown read", async () => {
+test("a failed batch call yields empty readings, not a thrown read", async () => {
   // The API rejects the whole batch if ONE image is unreadable ("Unable to process
   // input image"), and a safety block or transient fault does the same. Losing the
   // entire read — including the typed text that never went to the model — is worse
@@ -199,7 +203,8 @@ test("a failed batch call degrades every ink crop to [unclear], not a thrown rea
   // Typed text is ground truth and never depended on the model — it must survive.
   assert.equal(out[0].segments[0].text, "Photosynthesis");
   assert.equal(out[0].segments[0].uncertain, false);
-  // The ink crop reports honestly rather than taking the whole request down.
-  assert.equal(out[1].segments[0].text, "[unclear]");
-  assert.equal(out[1].segments[0].uncertain, true);
+  // The ink crop contributes nothing rather than taking the whole request down —
+  // and the caller can tell a failure from an illegible crop via readFailure.
+  assert.deepEqual(out[1].segments, []);
+  assert.ok(out.readFailure, "the failure reason is reported");
 });

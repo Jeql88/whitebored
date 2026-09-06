@@ -129,19 +129,20 @@ describe("StudioSidebar — notes in one action", () => {
     expect(onGenerateNotes).toHaveBeenCalled();
   });
 
-  it("interrupts with the review ONLY when the read left gaps", () => {
-    renderSidebar({ activeTab: "notes", transcript: artifact(true), transcriptConfirmed: false });
+  it("never interrupts with a correction step — reading goes straight to notes", () => {
+    // The transcription review was removed: the AI reads the board as well as it
+    // can and the notes come from that. What it must NOT do is show a half-read
+    // transcription as if it were something to fix.
+    renderSidebar({ activeTab: "notes", transcript: artifact(true) });
 
-    expect(screen.getByRole("region", { name: /transcription review/i })).toBeInTheDocument();
-    // Notes are not written from text the user has not corrected.
-    expect(screen.queryByRole("article", { name: /notes/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /transcription review/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/unclear/i)).not.toBeInTheDocument();
   });
 
   it("does not interrupt when the read was clean — notes are what shows", () => {
     renderSidebar({
       activeTab: "notes",
       transcript: artifact(false),
-      transcriptConfirmed: true,
       notesLines: [{ text: "Mitosis has four phases", kind: "key-point", sourceElementIds: ["s1"], origin: "board" }],
     });
 

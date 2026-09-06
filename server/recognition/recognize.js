@@ -31,24 +31,27 @@ const SCHEMA_INSTRUCTION =
   "You are transcribing handwriting and diagram labels from images. " +
   "Each image is tagged with a cropId. Return ONLY JSON: an object mapping each " +
   'cropId to { "segments": [ { "text": string, "uncertain": boolean } ] }. ' +
-  "Mark a segment uncertain when the ink is illegible; never guess silently. " +
-  "Read only what is drawn; do not invent, summarize, or add anything.";
+  // The user reviews the NOTES, not the raw reading, so hedging on a smudged
+  // letter helps nobody: read messy handwriting the way a person would, using the
+  // surrounding words to settle an ambiguous one. What must not happen is
+  // inventing CONTENT that is not on the board — that is the line that matters,
+  // and it is still absolute.
+  "Read messy handwriting as a careful human reader would: use surrounding " +
+  "context to resolve an ambiguous letter or word rather than hedging. Omit a " +
+  "cropId entirely only if there is genuinely nothing legible in it. " +
+  "Read only what is drawn; never invent, summarize, or add anything.";
 
-function unclearSegment() {
-  // A first-class [unclear] gap the user can tap and fix (story 6).
-  return { text: "[unclear]", uncertain: true };
-}
-
-// Normalize the model's per-crop answer into the D5 segment list. Tolerant of a
-// missing/blank answer (→ an [unclear] gap) but strict about the segment shape:
-// a segment must carry text, else it becomes an unclear gap rather than garbage.
+// Normalize the model's per-crop answer into the D5 segment list. A crop the model
+// could not read yields NO segments rather than an "[unclear]" placeholder: notes
+// are written from what was actually read, and a placeholder in the transcription
+// only ever became noise in the notes. The strokes themselves are untouched on the
+// board, so nothing is lost — the user can always redraw or type the word.
 function segmentsFrom(answer) {
   const segs = answer && Array.isArray(answer.segments) ? answer.segments : null;
-  if (!segs || segs.length === 0) return [unclearSegment()];
-  const cleaned = segs
-    .filter((s) => s && typeof s.text === "string")
+  if (!segs) return [];
+  return segs
+    .filter((s) => s && typeof s.text === "string" && s.text.trim())
     .map((s) => ({ text: s.text, uncertain: Boolean(s.uncertain) }));
-  return cleaned.length > 0 ? cleaned : [unclearSegment()];
 }
 
 // Pull the JSON text out of a central-module result. The module resolves to

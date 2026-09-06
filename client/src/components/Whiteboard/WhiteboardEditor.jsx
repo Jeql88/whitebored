@@ -52,7 +52,6 @@ import {
   saveScope,
   transcribeBoard,
   getTranscription,
-  saveTranscription,
 } from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
 import { getColorForName, getInitials } from "../../utils/userColor";
@@ -115,7 +114,6 @@ export default function WhiteboardEditor() {
   // (D3): Phase 2 runs on corrected text, never on the raw read.
   const [transcript, setTranscript] = useState(null);
   const [transcribing, setTranscribing] = useState(false);
-  const [transcriptConfirmed, setTranscriptConfirmed] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [activeDoc, setActiveDoc] = useState(null);
   const [activePage, setActivePage] = useState(1);
@@ -646,58 +644,26 @@ export default function WhiteboardEditor() {
       const artifact = await readBoard();
       if (!artifact) return;
 
+      // Straight to notes. The AI reads the board as well as it can and writes
+      // notes from that; there is no correction step in between. What still holds
+      // is the grounding fence — a note line must trace to text actually read from
+      // the board, so the model cannot invent content, only misread it.
       setTranscript(artifact);
-
-      if (artifact.hasUnclear) {
-        // Some words could not be read. Stop here — writing notes from guesses is
-        // exactly what the review step exists to prevent.
-        setTranscriptConfirmed(false);
-        showToast("Some words were unclear — fill them in, then notes will generate.");
-        return;
-      }
-
-      // Clean read: skip straight to notes.
-      setTranscriptConfirmed(true);
       generateNotesFrom(artifact);
     } catch {
       showToast("Couldn't read the board. Try again.");
     } finally {
       setTranscribing(false);
     }
-    // generateNotesFrom is declared below; it only closes over stable values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readBoard, notesBusy, transcribing]);
 
   // Re-read a board that has changed since the last read.
   const rereadBoard = useCallback(async () => {
     setTranscript(null);
-    setTranscriptConfirmed(false);
     setNotesLines([]);
     await generateNotes();
   }, [generateNotes]);
-
-  // Persist each correction as it happens, so a reload does not lose the user's
-  // fixes and Phase 2 always reads the corrected artifact.
-  const correctTranscript = useCallback(
-    (artifact) => {
-      setTranscript(artifact);
-      saveTranscription(whiteboardId, artifact).catch(() => {});
-    },
-    [whiteboardId]
-  );
-
-  // Confirming the gaps continues straight into notes — the user asked for notes,
-  // the review was an interruption, so finishing it should not need a second click.
-  const confirmTranscript = useCallback(
-    (artifact) => {
-      setTranscript(artifact);
-      setTranscriptConfirmed(true);
-      saveTranscription(whiteboardId, artifact).catch(() => {});
-      generateNotesFrom(artifact);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [whiteboardId]
-  );
 
   // Regenerate over the EXISTING notes (D7): the server reconciles fresh output
   // against what is stored, so a line the user edited survives and a line whose
@@ -706,8 +672,8 @@ export default function WhiteboardEditor() {
   const regenerateNotes = useCallback(() => {
     const socket = socketRef.current;
     if (!socket) return;
-    if (!transcript || !transcriptConfirmed) {
-      return showToast("Read the board and confirm the transcription first.");
+    if (!transcript) {
+      return showToast("Generate notes first, then this rewrites them.");
     }
     const api = apiRef.current;
     setNotesBusy(true);
@@ -718,7 +684,7 @@ export default function WhiteboardEditor() {
       noteType,
       boardElementIds: api ? api.getSceneElements().map((el) => el.id) : [],
     });
-  }, [whiteboardId, transcript, transcriptConfirmed, noteType]);
+  }, [whiteboardId, transcript, noteType]);
 
   // Click a note line → highlight the shapes it came from (story 9). The editor
   // already scrolls-to-content elsewhere; this reuses the same Excalidraw API.
@@ -1039,7 +1005,6 @@ export default function WhiteboardEditor() {
       .then((r) => {
         if (cancelled || !r?.artifact) return;
         setTranscript(r.artifact);
-        setTranscriptConfirmed(!r.artifact.hasUnclear);
       })
       .catch(() => {});
     return () => {
@@ -1419,11 +1384,8 @@ export default function WhiteboardEditor() {
             onTabChange={setStudioTab}
             onClose={() => setOpenPanel(null)}
             transcript={transcript}
-            transcriptConfirmed={transcriptConfirmed}
             transcribing={transcribing}
             onReread={rereadBoard}
-            onCorrectTranscript={correctTranscript}
-            onConfirmTranscript={confirmTranscript}
             onGenerateNotes={generateNotes}
             onRegenerateNotes={regenerateNotes}
             notesLines={notesLines}
