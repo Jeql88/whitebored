@@ -40,6 +40,12 @@ services:
         value: gemini-3.6-flash
       - key: GEMINI_EMBED_MODEL
         value: gemini-embedding-001
+      # Calls per user per day before the app refuses locally, with a clear
+      # message, instead of spending one to be told 429 mid-board-read. The free
+      # tier's real limit is a DAILY cap (~20 generate calls), not a per-minute
+      # one. Set to 0 for a paid key with no meaningful daily quota.
+      - key: GEMINI_DAILY_BUDGET
+        value: "20"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
