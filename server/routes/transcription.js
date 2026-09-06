@@ -118,8 +118,15 @@ module.exports = function transcriptionRoutes() {
       );
       res.json({ artifact });
     } catch (err) {
-      console.error("[transcription] failed:", err.message);
-      res.status(500).json({ error: "Transcription failed" });
+      // Surface the real cause. A generic 500 here is unactionable: the model call,
+      // the JSON parse and the Mongo upsert can all fail, and from the client they
+      // look identical. The message and code are diagnostic, not secret.
+      console.error("[transcription] failed:", err.stack || err.message);
+      res.status(500).json({
+        error: "Transcription failed",
+        reason: String(err.message || err).slice(0, 300),
+        code: err.code || err.status || null,
+      });
     }
   });
 

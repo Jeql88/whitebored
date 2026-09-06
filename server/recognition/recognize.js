@@ -126,8 +126,18 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
 
     // Ink crops → ONE batched, per-crop-keyed request through the central module.
     if (inkCrops.length > 0) {
-      const result = await gemini.generate(buildRequest(userId, inkCrops));
-      const byCropId = parseBatch(await textOf(result));
+      // A batch that fails takes every ink crop with it: the API rejects the whole
+      // request if ONE image is unreadable ("Unable to process input image"), and a
+      // safety block or transient fault behaves the same. Losing the entire read —
+      // including typed text that never went to the model — is worse than reporting
+      // the ink as [unclear], which the user can see and correct. So a failed call
+      // degrades exactly like an omitted crop rather than propagating.
+      let byCropId = {};
+      try {
+        byCropId = parseBatch(await textOf(await gemini.generate(buildRequest(userId, inkCrops))));
+      } catch (err) {
+        console.error("[recognize] batch read failed, degrading to [unclear]:", err.message);
+      }
       for (const crop of inkCrops) {
         readings.set(crop.cropId, {
           cropId: crop.cropId,

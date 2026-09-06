@@ -180,3 +180,26 @@ test("an ink crop is sent as inlineData the API accepts, not a raw data URL", as
   assert.equal(imagePart.inlineData.data, "AAAA");
   assert.ok(!parts.some((p) => "image" in p), "no part should use the invalid `image` key");
 });
+
+test("a failed batch call degrades every ink crop to [unclear], not a thrown read", async () => {
+  // The API rejects the whole batch if ONE image is unreadable ("Unable to process
+  // input image"), and a safety block or transient fault does the same. Losing the
+  // entire read — including the typed text that never went to the model — is worse
+  // than reporting the ink as unclear, which is exactly what the user can then fix.
+  const stub = createGeminiStub();
+  stub.enqueueError(Object.assign(new Error("Unable to process input image"), { status: 400 }));
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+
+  const out = await recognizer.recognize([
+    { cropId: "t1", kind: "text", text: "Photosynthesis", sourceElementIds: ["a"], bbox: {} },
+    { cropId: "i1", kind: "ink", image: "data:image/png;base64,AAAA", sourceElementIds: ["b"], bbox: {} },
+  ]);
+
+  assert.equal(out.length, 2);
+  // Typed text is ground truth and never depended on the model — it must survive.
+  assert.equal(out[0].segments[0].text, "Photosynthesis");
+  assert.equal(out[0].segments[0].uncertain, false);
+  // The ink crop reports honestly rather than taking the whole request down.
+  assert.equal(out[1].segments[0].text, "[unclear]");
+  assert.equal(out[1].segments[0].uncertain, true);
+});
