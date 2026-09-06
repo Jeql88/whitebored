@@ -107,7 +107,9 @@ app.get("/api/oauth/done", async (req, res) => {
   }
 });
 
-app.use(express.json({ limit: "10mb" }));
+// A board read posts one rasterized image per crop, and a busy board has well
+// over a hundred; 10mb rejected those outright.
+app.use(express.json({ limit: "50mb" }));
 
 // Liveness probe — returns 503 if DB is unreachable.
 app.get("/healthz", async (req, res) => {

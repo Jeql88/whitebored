@@ -14,12 +14,20 @@ function handleUnauthorized() {
   }
 }
 
-// Central fetch wrapper: 60s timeout, 401 handling, tolerant JSON parsing.
-// BetterAuth uses cookie-based sessions — credentials: "include" ensures
-// cookies are sent on cross-origin requests (dev Vite proxy is same-origin).
-export async function apiFetch(path, { method = "GET", body, auth = true, headers = {} } = {}) {
+// Central fetch wrapper: 401 handling, tolerant JSON parsing, and a timeout that
+// callers can raise. BetterAuth uses cookie-based sessions — credentials:
+// "include" ensures cookies are sent on cross-origin requests (dev Vite proxy is
+// same-origin).
+//
+// 60s suits an ordinary request, but reading a whole board is several model calls
+// over many images and legitimately runs longer; aborting it mid-flight looked
+// like a bug ("signal is aborted without reason") when the work was still going.
+export async function apiFetch(
+  path,
+  { method = "GET", body, auth = true, headers = {}, timeoutMs = 60000 } = {}
+) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const h = { ...headers };
   if (body !== undefined) h["Content-Type"] = "application/json";
   try {

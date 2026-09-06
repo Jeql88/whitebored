@@ -208,3 +208,37 @@ test("a failed batch call yields empty readings, not a thrown read", async () =>
   assert.deepEqual(out[1].segments, []);
   assert.ok(out.readFailure, "the failure reason is reported");
 });
+
+test("a large board is split across several requests, not one oversized one", async () => {
+  // 157 crops in a single request timed out on the client and risked the body
+  // limit. Chunking bounds each request; the readings must still come back keyed
+  // correctly and in caller order.
+  const stub = createGeminiStub();
+  const crops = [];
+  for (let i = 0; i < 30; i++) {
+    crops.push({
+      cropId: `c${i}`,
+      kind: "ink",
+      image: "data:image/png;base64,AAAA",
+      sourceElementIds: [`f${i}`],
+      bbox: {},
+    });
+  }
+  // Each chunk gets its own canned reply covering the ids it was given.
+  for (let start = 0; start < 30; start += 12) {
+    const answer = {};
+    for (let i = start; i < Math.min(start + 12, 30); i++) {
+      answer[`c${i}`] = { segments: [{ text: `read ${i}`, uncertain: false }] };
+    }
+    stub.enqueue({ text: JSON.stringify(answer) });
+  }
+
+  const out = await createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" })
+    .recognize(crops);
+
+  // More than one request went out, and every crop still came back in order.
+  assert.ok(stub.calls.length > 1, "expected the crops to be split across requests");
+  assert.equal(out.length, 30);
+  assert.equal(out[0].segments[0].text, "read 0");
+  assert.equal(out[29].segments[0].text, "read 29");
+});

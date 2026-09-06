@@ -102,6 +102,19 @@ function makeUnionFind(ids) {
 const GAP_TO_HEIGHT = 1.2; // gap under 1.2x the SMALLER box merges
 const MAX_MERGE_GAP = 60; // px — beyond this, strokes are separate content
 
+// The gap on each axis independently. gapBetween() collapses these into one
+// radial distance, which cannot express "far apart across, but on the same line".
+function gapAxes(a, b) {
+  const ax2 = (a.x ?? 0) + (a.width ?? 0);
+  const bx2 = (b.x ?? 0) + (b.width ?? 0);
+  const ay2 = (a.y ?? 0) + (a.height ?? 0);
+  const by2 = (b.y ?? 0) + (b.height ?? 0);
+  return {
+    dx: Math.max(0, Math.max(a.x ?? 0, b.x ?? 0) - Math.min(ax2, bx2)),
+    dy: Math.max(0, Math.max(a.y ?? 0, b.y ?? 0) - Math.min(ay2, by2)),
+  };
+}
+
 function gapBetween(a, b) {
   const ax2 = (a.x ?? 0) + (a.width ?? 0);
   const bx2 = (b.x ?? 0) + (b.width ?? 0);
@@ -112,14 +125,28 @@ function gapBetween(a, b) {
   return Math.hypot(dx, dy);
 }
 
+// Writing runs in LINES, so the axes are not symmetric: letters in a word sit
+// side by side with almost no vertical offset, and the next line sits below with
+// almost no horizontal offset. Testing a single radial distance either splits
+// words apart (too tight) or chains down the page (too loose), so each axis gets
+// its own budget — generous horizontally, about a line-height vertically.
 function clusterFreeStrokes(uf, strokes) {
   for (let i = 0; i < strokes.length; i++) {
     for (let j = i + 1; j < strokes.length; j++) {
       const a = strokes[i];
       const b = strokes[j];
       const smaller = Math.max(1, Math.min(a.height ?? 0, b.height ?? 0));
-      const scale = Math.min(smaller * GAP_TO_HEIGHT, MAX_MERGE_GAP);
-      if (gapBetween(a, b) <= scale) uf.union(a.id, b.id);
+      const { dx, dy } = gapAxes(a, b);
+
+      // Same line, next word: a wide horizontal reach but the strokes must
+      // actually overlap vertically, which is what keeps it on one line.
+      const sameLine =
+        dy <= smaller * 0.5 && dx <= Math.min(smaller * GAP_TO_HEIGHT * 2, MAX_MERGE_GAP);
+      // Next line of the same block: directly above/below, within a line height.
+      const nextLine =
+        dx <= smaller * 0.5 && dy <= Math.min(smaller * GAP_TO_HEIGHT, MAX_MERGE_GAP);
+
+      if (sameLine || nextLine) uf.union(a.id, b.id);
     }
   }
 }

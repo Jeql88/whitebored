@@ -27,6 +27,11 @@
 
 // What we ask the model to return, stated in the prompt so the grounding lives
 // server-side. Kept terse; tests assert on the RESULT, never on this string.
+// How many images ride in one model request. Bounded so a large board becomes
+// several parallel requests instead of one that times out or exceeds the body
+// limit.
+const MAX_CROPS_PER_REQUEST = 12;
+
 const SCHEMA_INSTRUCTION =
   "You are transcribing handwriting and diagram labels from images. " +
   "Each image is tagged with a cropId. Return ONLY JSON: an object mapping each " +
@@ -138,9 +143,29 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
       // including typed text that never went to the model — is worse than reporting
       // the ink as [unclear], which the user can see and correct. So a failed call
       // degrades exactly like an omitted crop rather than propagating.
+      // A busy board can yield well over a hundred ink crops, and sending every
+      // image in ONE request is both slow enough to hit the client timeout and
+      // large enough to hit the body limit. Chunking keeps each request bounded,
+      // and a chunk that fails only costs its own crops rather than the whole read.
       let byCropId = {};
       try {
-        byCropId = parseBatch(await textOf(await gemini.generate(buildRequest(userId, inkCrops))));
+        const chunks = [];
+        for (let i = 0; i < inkCrops.length; i += MAX_CROPS_PER_REQUEST) {
+          chunks.push(inkCrops.slice(i, i + MAX_CROPS_PER_REQUEST));
+        }
+        const results = await Promise.all(
+          chunks.map(async (chunk) => {
+            try {
+              return parseBatch(await textOf(await gemini.generate(buildRequest(userId, chunk))));
+            } catch (err) {
+              // One bad chunk must not lose the rest of the board.
+              console.error("[recognize] chunk failed:", err.message);
+              readFailure = err.message || String(err);
+              return {};
+            }
+          })
+        );
+        byCropId = Object.assign({}, ...results);
       } catch (err) {
         // Record why, so the caller can tell the user "the read failed" instead of
         // silently showing [unclear] everywhere, which looks like the AI simply

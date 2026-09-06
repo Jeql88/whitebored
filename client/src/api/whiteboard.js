@@ -192,7 +192,13 @@ export function saveScope(id, scope) {
 // Read the board: the client groups + rasterizes crops, the server runs them
 // through recognize() and returns the structured artifact the review UI corrects.
 export function transcribeBoard(id, crops) {
-  return apiFetch(`${WB}/${id}/transcription`, { method: "POST", body: { crops } });
+  // Reading a busy board is several batched model calls over many images; the
+  // default 60s aborts it while it is still working.
+  return apiFetch(`${WB}/${id}/transcription`, {
+    method: "POST",
+    body: { crops },
+    timeoutMs: 240000,
+  });
 }
 
 export function getTranscription(id) {
