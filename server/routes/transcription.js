@@ -107,7 +107,13 @@ module.exports = function transcriptionRoutes() {
 
     try {
       const transcriber = createTranscriber({ gemini, userId: req.user.userId });
-      const artifact = await transcriber.transcribe(crops, { userId: req.user.userId });
+      // Hand the seam what this board read last time so unchanged ink is reused
+      // rather than re-sent to the model (the free tier allows ~20 calls a DAY).
+      const previous = await loadArtifact(req.params.id).catch(() => null);
+      const artifact = await transcriber.transcribe(crops, {
+        userId: req.user.userId,
+        previous,
+      });
 
       // Persist so a reload returns to the review step rather than re-reading the
       // board (which costs another model call).

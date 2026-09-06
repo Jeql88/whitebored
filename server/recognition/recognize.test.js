@@ -347,3 +347,95 @@ test("a partial read does NOT report a failure — some crops are legitimately b
   assert.deepEqual(out[1].segments, []);
   assert.equal(out.readFailure, null);
 });
+
+// --- Reusing unchanged ink ----------------------------------------------------
+// The free tier allows ~20 generate calls PER DAY. Re-reading a whole board to
+// regenerate notes after editing one word spent a call on ink the model had
+// already read, which is the difference between a few boards and a day's work.
+
+function inkWithImage(cropId, image) {
+  return { cropId, kind: "ink", image, sourceElementIds: [cropId], bbox: {} };
+}
+
+test("ink unchanged since the last read is reused, and never re-sent to the model", async () => {
+  const stub = createGeminiStub();
+  stub.enqueue({
+    text: JSON.stringify([
+      { cropId: "crop-a", segments: [{ text: "alpha" }] },
+      { cropId: "crop-b", segments: [{ text: "beta" }] },
+    ]),
+  });
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+
+  const crops = [inkWithImage("crop-a", "IMG-A"), inkWithImage("crop-b", "IMG-B")];
+  const first = await recognizer.recognize(crops);
+  assert.equal(stub.calls.length, 1);
+
+  // Nothing changed: the second read must cost NO model call at all.
+  const previous = { entries: first };
+  const again = await recognizer.recognize(crops, { previous });
+  assert.equal(stub.calls.length, 1, "an unchanged board must not call the model");
+  assert.equal(again[0].segments[0].text, "alpha");
+  assert.equal(again[1].segments[0].text, "beta");
+});
+
+test("only the crop whose ink actually changed is re-read", async () => {
+  const stub = createGeminiStub();
+  stub.enqueue({
+    text: JSON.stringify([
+      { cropId: "crop-a", segments: [{ text: "alpha" }] },
+      { cropId: "crop-b", segments: [{ text: "beta" }] },
+    ]),
+  });
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+  const first = await recognizer.recognize([
+    inkWithImage("crop-a", "IMG-A"),
+    inkWithImage("crop-b", "IMG-B"),
+  ]);
+
+  stub.enqueue({ text: JSON.stringify([{ cropId: "crop-b", segments: [{ text: "beta v2" }] }]) });
+  const out = await recognizer.recognize(
+    [inkWithImage("crop-a", "IMG-A"), inkWithImage("crop-b", "IMG-B-EDITED")],
+    { previous: { entries: first } }
+  );
+
+  // The second request carried ONLY the edited crop.
+  const sent = stub.calls[1].contents[0].parts
+    .filter((p) => typeof p.text === "string" && p.text.startsWith("cropId:"))
+    .map((p) => p.text.replace("cropId: ", ""));
+  assert.deepEqual(sent, ["crop-b"], "only changed ink should be re-sent");
+  assert.equal(out[0].segments[0].text, "alpha", "the untouched crop keeps its reading");
+  assert.equal(out[1].segments[0].text, "beta v2");
+});
+
+test("redrawn ink under the SAME cropId is re-read, never served stale", async () => {
+  // cropIds derive from element ids, which survive the user redrawing that stroke.
+  // Keying reuse on the id would hand back a reading of ink that no longer exists,
+  // so reuse is keyed on the image itself.
+  const stub = createGeminiStub();
+  stub.enqueue({ text: JSON.stringify([{ cropId: "crop-a", segments: [{ text: "before" }] }]) });
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+  const first = await recognizer.recognize([inkWithImage("crop-a", "IMG-BEFORE")]);
+
+  stub.enqueue({ text: JSON.stringify([{ cropId: "crop-a", segments: [{ text: "after" }] }]) });
+  const out = await recognizer.recognize([inkWithImage("crop-a", "IMG-AFTER")], {
+    previous: { entries: first },
+  });
+
+  assert.equal(stub.calls.length, 2, "changed ink must reach the model");
+  assert.equal(out[0].segments[0].text, "after");
+});
+
+test("a fully reused board is not mistaken for an empty read", async () => {
+  // The all-empty guard must not fire when every crop was answered from cache: no
+  // model call happened, and that is success, not a failure to read.
+  const stub = createGeminiStub();
+  stub.enqueue({ text: JSON.stringify([{ cropId: "crop-a", segments: [{ text: "alpha" }] }]) });
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+  const first = await recognizer.recognize([inkWithImage("crop-a", "IMG-A")]);
+
+  const out = await recognizer.recognize([inkWithImage("crop-a", "IMG-A")], {
+    previous: { entries: first },
+  });
+  assert.equal(out.readFailure, null, "a fully cached read is not a failure");
+});

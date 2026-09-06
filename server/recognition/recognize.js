@@ -227,6 +227,31 @@ function buildRequest(userId, inkCrops) {
   };
 }
 
+// A crop's identity for caching: the ink itself, not its id. A cropId is derived
+// from an element id, which survives the user REDRAWING that stroke — so keying a
+// cache on the id would serve a stale reading of ink that has since changed.
+// Hashing the rendered image means a crop is reused only when it is pixel-identical
+// to what was already read, and any edit falls through to the model naturally.
+const crypto = require("node:crypto");
+
+function inkFingerprint(crop) {
+  if (crop.kind === "text") return null;
+  return crypto.createHash("sha1").update(String(crop.image || "")).digest("hex");
+}
+
+// Readings already obtained for this board, as { fingerprint -> segments }. Built
+// from the previously stored artifact, which carries the fingerprint each entry was
+// read under. Missing or older artifacts simply yield no reuse.
+function cacheFromArtifact(artifact) {
+  const cache = new Map();
+  for (const entry of artifact?.entries || []) {
+    if (entry?.fingerprint && Array.isArray(entry.segments)) {
+      cache.set(entry.fingerprint, entry.segments);
+    }
+  }
+  return cache;
+}
+
 // Create the recognizer bound to a central Gemini module and the requesting user
 // (the module throttles per user). `userId` may be supplied per-call instead.
 function createRecognizer({ gemini, userId: defaultUserId } = {}) {
@@ -234,11 +259,27 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
     throw new Error("createRecognizer: a central Gemini module is required");
   }
 
-  async function recognize(crops = [], { userId = defaultUserId } = {}) {
+  async function recognize(crops = [], { userId = defaultUserId, previous = null } = {}) {
     if (!Array.isArray(crops) || crops.length === 0) return [];
 
     const textCrops = crops.filter((c) => c.kind === "text");
-    const inkCrops = crops.filter((c) => c.kind !== "text");
+
+    // Ink already read, unchanged since last time, costs nothing to reuse. Re-reading
+    // a whole board to regenerate notes after editing one word spent a model call on
+    // ink the model had already seen — and on a ~20-call-per-day free tier that is
+    // the difference between a handful of boards and a working day's use. Reuse is
+    // keyed on the IMAGE, so redrawn ink is never served stale.
+    const cache = cacheFromArtifact(previous);
+    const fingerprints = new Map();
+    const inkCrops = [];
+    const reused = [];
+    for (const crop of crops) {
+      if (crop.kind === "text") continue;
+      const fp = inkFingerprint(crop);
+      fingerprints.set(crop.cropId, fp);
+      if (cache.has(fp)) reused.push(crop);
+      else inkCrops.push(crop);
+    }
 
     // Typed text is ground truth: verbatim single certain segment, no model call.
     // Set when the batch call itself failed, as opposed to the model genuinely
@@ -251,6 +292,16 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
         segments: [{ text: String(crop.text ?? ""), uncertain: false }],
         sourceElementIds: crop.sourceElementIds,
         bbox: crop.bbox,
+      });
+    }
+
+    for (const crop of reused) {
+      readings.set(crop.cropId, {
+        cropId: crop.cropId,
+        segments: cache.get(fingerprints.get(crop.cropId)),
+        sourceElementIds: crop.sourceElementIds,
+        bbox: crop.bbox,
+        fingerprint: fingerprints.get(crop.cropId),
       });
     }
 
@@ -309,6 +360,7 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
           segments,
           sourceElementIds: crop.sourceElementIds,
           bbox: crop.bbox,
+          fingerprint: fingerprints.get(crop.cropId),
         });
       }
 
@@ -318,7 +370,7 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
       // silently truncated response, a safety block. Left unreported it surfaced as
       // a blank transcription that looked like a working feature finding nothing,
       // which is the one outcome the user cannot act on. Say so instead.
-      if (readCount === 0 && !readFailure) {
+      if (readCount === 0 && !readFailure && reused.length === 0) {
         readFailure =
           "The board was read but nothing came back — none of the " +
           `${inkCrops.length} handwriting crops produced any text.`;

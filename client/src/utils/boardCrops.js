@@ -2,6 +2,7 @@ import { exportToBlob } from "@excalidraw/excalidraw";
 // CommonJS module: Rollup cannot statically resolve a NAMED import from
 // `module.exports`, so take the default export and destructure at runtime.
 import groupingModule from "../../../server/recognition/grouping.js";
+import { cropDimensions, PADDING } from "./cropDimensions";
 
 const { groupCrops } = groupingModule;
 
@@ -26,24 +27,12 @@ async function cropImage(elements, files) {
     files,
     mimeType: "image/png",
     appState: { exportBackground: true, viewBackgroundColor: "#ffffff" },
-    exportPadding: 16,
-    getDimensions: (w, h) => {
-      // The vision model rejects very small images outright ("Unable to process
-      // input image"), and a single short stroke can be only tens of pixels wide.
-      // The old 3x cap left such a crop around 120px and it was refused — so scale
-      // to a real MINIMUM edge rather than a fixed multiple, while capping the
-      // long edge so a batch of images stays within one request.
-      const longest = Math.max(w, h);
-      const shortest = Math.max(1, Math.min(w, h));
-      const upToMinimum = 320 / shortest; // guarantee a readable short edge
-      const downToMaximum = 1600 / longest; // keep the payload sane
-      const scale = Math.max(1, Math.min(upToMinimum, downToMaximum));
-      return {
-        width: Math.max(64, Math.round(w * scale)),
-        height: Math.max(64, Math.round(h * scale)),
-        scale,
-      };
-    },
+    // Padding does double duty: it gives the strokes breathing room AND lifts a
+    // thin crop's short edge over the model's minimum without distorting the ink.
+    // Scaling a 1200x30 strip up to a 320px short edge would cost seventeen tiles;
+    // padding it costs only whitespace inside the tile already being paid for.
+    exportPadding: PADDING,
+    getDimensions: cropDimensions,
   });
 
   return new Promise((resolve, reject) => {
