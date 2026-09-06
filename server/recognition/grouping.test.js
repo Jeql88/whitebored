@@ -162,3 +162,32 @@ test("crop ids are stable and unique", () => {
   assert.equal(new Set(ids).size, ids.length);
   ids.forEach((id) => assert.ok(id, "cropId is present"));
 });
+
+test("a tall stroke does not chain unrelated content into one giant crop", () => {
+  // The merge radius used to scale off the TALLER of two boxes, so a single long
+  // arrow gave itself a radius of hundreds of pixels — and because merging is
+  // transitive, that pulled a whole board into one crop. A real board then read
+  // back as one blob of ~40 disconnected fragments, which no amount of prompting
+  // could turn into structured notes.
+  const crops = groupCrops([
+    inkEl("tall", { x: 500, y: 0, width: 6, height: 400 }), // a long arrow-like stroke
+    inkEl("left", { x: 0, y: 10, width: 30, height: 12 }), // separate note, ~470px away
+    inkEl("right", { x: 900, y: 10, width: 30, height: 12 }), // separate note, ~400px away
+  ]);
+
+  // Three distinct pieces of content stay three crops, not one.
+  assert.equal(crops.length, 3);
+  const sizes = crops.map((c) => c.sourceElementIds.length).sort();
+  assert.deepEqual(sizes, [1, 1, 1]);
+});
+
+test("strokes genuinely close together still merge into one crop", () => {
+  // The bound must not go so far that letters of the same word split apart.
+  const crops = groupCrops([
+    inkEl("a", { x: 0, y: 0, width: 10, height: 14 }),
+    inkEl("b", { x: 13, y: 0, width: 10, height: 14 }), // 3px gap — same word
+  ]);
+
+  assert.equal(crops.length, 1);
+  assert.equal(crops[0].sourceElementIds.length, 2);
+});

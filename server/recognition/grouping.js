@@ -93,7 +93,14 @@ function makeUnionFind(ids) {
 // merge when the gap between their boxes is below a threshold scaled to their
 // stroke height — a proxy for "these belong to the same word/line". Applied only
 // to strokes with no structural home (structure already decided the rest).
-const GAP_TO_HEIGHT = 1.2; // gap under 1.2x the taller box merges
+// Two strokes merge when the gap between them is small RELATIVE TO THE SMALLER of
+// the two — scaling off the taller box let one long stroke (an arrow, a big
+// container outline) claim a merge radius of hundreds of pixels, and because
+// merging is transitive that chained the entire board into a single crop. A cap
+// bounds it absolutely: handwriting in the same word or line is close in real
+// terms, however tall the neighbouring shape happens to be.
+const GAP_TO_HEIGHT = 1.2; // gap under 1.2x the SMALLER box merges
+const MAX_MERGE_GAP = 60; // px — beyond this, strokes are separate content
 
 function gapBetween(a, b) {
   const ax2 = (a.x ?? 0) + (a.width ?? 0);
@@ -110,7 +117,8 @@ function clusterFreeStrokes(uf, strokes) {
     for (let j = i + 1; j < strokes.length; j++) {
       const a = strokes[i];
       const b = strokes[j];
-      const scale = Math.max(a.height ?? 0, b.height ?? 0, 1) * GAP_TO_HEIGHT;
+      const smaller = Math.max(1, Math.min(a.height ?? 0, b.height ?? 0));
+      const scale = Math.min(smaller * GAP_TO_HEIGHT, MAX_MERGE_GAP);
       if (gapBetween(a, b) <= scale) uf.union(a.id, b.id);
     }
   }
