@@ -118,26 +118,51 @@ function createRetriever({ gemini, chunks, documents } = {}) {
   // embeddings are never recomputed here — only the query is embedded. Returns hits
   // without the raw embedding[] (callers want text + citation + score, not vectors).
   async function retrieve(query, scope = {}) {
-    const text = typeof query === "string" ? query.trim() : "";
-    if (!text) return [];
-
-    const candidates = await chunks.forScope(scope);
-    if (candidates.length === 0) return [];
-
-    const k = Number.isFinite(scope.k) ? scope.k : DEFAULT_TOP_K;
-    const [queryEmbedding] = await embed([text], scope.userId);
-
-    const ranked = rankByCosine(queryEmbedding, candidates, k);
-    return ranked.map(({ docId, boardId, page, text: chunkText, score }) => ({
-      docId,
-      boardId,
-      page,
-      text: chunkText,
-      score,
-    }));
+    const [hits] = await retrieveMany([query], scope);
+    return hits || [];
   }
 
-  return { indexDocument, retrieve };
+  // Retrieve for SEVERAL queries against the same scope in ONE embedding call.
+  //
+  // Coverage judges each topic by retrieving for it, which meant one embedding
+  // request per topic: a 20-topic document spent 20 of a ~20-call-per-day free
+  // tier in a single pass. The queries are independent and share one candidate
+  // set, and gemini.embed already takes an array — so the batch is the natural
+  // unit, and retrieve() above is just the one-query case of it.
+  async function retrieveMany(queries, scope = {}) {
+    const texts = (Array.isArray(queries) ? queries : [queries]).map((q) =>
+      typeof q === "string" ? q.trim() : ""
+    );
+    if (texts.length === 0) return [];
+
+    // A blank query retrieves nothing, but must still hold its slot in the result
+    // so callers can zip results back to the queries they asked for.
+    const askable = texts.filter(Boolean);
+    if (askable.length === 0) return texts.map(() => []);
+
+    const candidates = await chunks.forScope(scope);
+    if (candidates.length === 0) return texts.map(() => []);
+
+    const k = Number.isFinite(scope.k) ? scope.k : DEFAULT_TOP_K;
+    const vectors = await embed(askable, scope.userId);
+
+    const byText = new Map();
+    askable.forEach((t, i) => byText.set(t, vectors[i]));
+
+    return texts.map((text) => {
+      if (!text) return [];
+      const ranked = rankByCosine(byText.get(text), candidates, k);
+      return ranked.map(({ docId, boardId, page, text: chunkText, score }) => ({
+        docId,
+        boardId,
+        page,
+        text: chunkText,
+        score,
+      }));
+    });
+  }
+
+  return { indexDocument, retrieve, retrieveMany };
 }
 
 module.exports = { createRetriever, DEFAULT_TOP_K };

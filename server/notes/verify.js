@@ -27,6 +27,33 @@ const STOPWORDS = new Set([
   "with", "as", "by", "is", "are", "was", "were", "be", "been", "being", "it",
   "its", "this", "that", "these", "those", "from", "into", "then", "than", "so",
   "we", "you", "they", "i", "he", "she", "them", "our", "your", "their",
+  // --- connective vocabulary -------------------------------------------------
+  // Words a writer uses to turn board fragments into readable prose. Requiring
+  // them VERBATIM in the transcription was the gate's real failure: a line like
+  // "Mitosis produces two daughter cells" is fully supported by a board saying
+  // "mitosis ... the cell divides into two daughter cells", yet was dropped
+  // because the board never literally wrote "produces". The result was a model
+  // doing its job correctly and the user seeing a near-empty notes panel, with a
+  // model call already spent.
+  //
+  // These carry no factual claim of their own — an invented FACT still shows up
+  // as an unmatched noun or number, which is what the gate is actually for.
+  "has", "have", "had", "having", "do", "does", "did", "can", "could", "will",
+  "would", "shall", "should", "may", "might", "must", "when", "where", "which",
+  "who", "whom", "whose", "what", "why", "how", "if", "not", "no", "there",
+  "here", "all", "any", "each", "both", "more", "most", "some", "such", "only",
+  "own", "same", "other", "another", "between", "through", "during", "before",
+  "after", "above", "below", "up", "down", "out", "off", "over", "under",
+  "again", "further", "once", "because", "while", "about", "against", "among",
+  "produces", "produce", "produced", "results", "result", "resulting", "means",
+  "shows", "show", "shown", "gives", "give", "given", "makes", "make", "made",
+  "uses", "use", "used", "using", "occurs", "occur", "happens", "happen",
+  "involves", "involve", "includes", "include", "including", "consists",
+  "consist", "contains", "contain", "leads", "lead", "causes", "cause",
+  "requires", "require", "allows", "allow", "creates", "create", "forms", "form",
+  "becomes", "become", "begins", "begin", "starts", "start", "ends", "end",
+  "also", "well", "very", "much", "many", "one", "two", "first", "second",
+  "next", "last", "new", "old", "good", "different", "important", "key", "main",
 ]);
 
 // Break text into normalized tokens: lowercased, split on any non-alphanumeric run

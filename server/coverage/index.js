@@ -102,16 +102,12 @@ function documentText(pages) {
 // Parse the model's JSON into a raw topic array. A malformed reply must not crash the
 // pass — it yields no topics (degrade gracefully on the foreseen). Accepts a bare
 // array or an object wrapping `topics`. Mirrors fact-check's parseDiscrepancies.
+const { listSchema, parseList } = require("../gemini/jsonList");
+
+// An unreadable reply throws rather than yielding [] — "no topics found" and "the
+// reply was unreadable" are different answers and must not look identical.
 function parseTopics(text) {
-  let obj;
-  try {
-    obj = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (Array.isArray(obj)) return obj;
-  if (obj && Array.isArray(obj.topics)) return obj.topics;
-  return [];
+  return parseList(text, { key: "topics" });
 }
 
 // Normalize a raw model topic into a stored topic. A topic missing a label or a valid
@@ -151,7 +147,10 @@ function buildTopicRequest(userId, pages) {
         ],
       },
     ],
-    config: { responseMimeType: "application/json" },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: listSchema({ topic: { type: "string" } }, ["topic"]),
+    },
   };
 }
 
@@ -199,8 +198,8 @@ function fingerTag(topic) {
 // carries the topic's page range for the UI to deep-link. This is the D14 embeddings
 // path, not keyword equality — a re-worded board still matches its topic, and a merely
 // tangential hit is still a gap.
-async function judgeTopic(retrieve, topic, scope, threshold) {
-  const hits = await retrieve(topic.label, scope);
+// Judge one topic from the hits already retrieved for it.
+function judgeFromHits(topic, hits, threshold) {
   const best =
     Array.isArray(hits) && hits.length > 0
       ? hits.reduce((m, h) => (h && h.score > m ? h.score : m), -Infinity)
@@ -214,9 +213,22 @@ async function judgeTopic(retrieve, topic, scope, threshold) {
   };
 }
 
+// Retrieve for every topic at once where the retriever supports it (ONE embedding
+// call for the whole pass instead of one per topic), and fall back to independent
+// retrievals otherwise. The fallback is kept because `retrieve` is an injected
+// seam: tests and other callers may supply a plain one-query function.
+async function hitsForTopics(retrieve, retrieveMany, topics, scope) {
+  const labels = topics.map((t) => t.label);
+  if (typeof retrieveMany === "function") return retrieveMany(labels, scope);
+  return Promise.all(labels.map((label) => retrieve(label, scope)));
+}
+
 function createCoverage({
   gemini,
   retrieve,
+  // Optional batched retrieval: judging N topics costs ONE embedding call instead
+  // of N. Absent, the pass still works via `retrieve`.
+  retrieveMany,
   documents,
   userId: defaultUserId,
   threshold = DEFAULT_COVERAGE_THRESHOLD,
@@ -276,12 +288,19 @@ function createCoverage({
       return { report: { boardId, topics: [], total: 0, coveredCount: 0, gapCount: 0 } };
     }
 
-    const judged = [];
-    for (const topic of list) {
-      judged.push(
-        await judgeTopic(retrieve, topic, scope || { boardId, userId }, threshold)
-      );
-    }
+    // Judge every topic against the board. This used to be a sequential loop of
+    // retrieve() calls — one embedding request PER TOPIC — so a 20-topic document
+    // cost 20 model calls and could exhaust a whole day's free-tier quota in a
+    // single click. The retrievals are independent and share one chunk set, so they
+    // run together instead; a batching retriever collapses them into one request,
+    // and a plain one is at least no longer serialized.
+    const hits = await hitsForTopics(
+      retrieve,
+      retrieveMany,
+      list,
+      scope || { boardId, userId }
+    );
+    const judged = list.map((topic, i) => judgeFromHits(topic, hits[i], threshold));
 
     // Reconcile against the prior report so each topic keeps its stable id across the
     // re-run (story 31); the freshly-judged status wins.
@@ -310,7 +329,14 @@ function createCoverage({
 function createCoverageFromDeps({ gemini, retriever, documents } = {}) {
   if (!gemini || !retriever || typeof retriever.retrieve !== "function") return null;
   if (!documents || typeof documents.get !== "function") return null;
-  return createCoverage({ gemini, retrieve: retriever.retrieve, documents });
+  // Pass the batched retrieval when the retriever offers it, so a coverage pass
+  // costs one embedding call rather than one per topic.
+  return createCoverage({
+    gemini,
+    retrieve: retriever.retrieve,
+    retrieveMany: retriever.retrieveMany,
+    documents,
+  });
 }
 
 module.exports = {

@@ -43,6 +43,7 @@
 // in tests — no network, no real model.
 
 const { verifyLine, transcriptionText } = require("./verify");
+const { listSchema, parseList } = require("../gemini/jsonList");
 
 const NOTE_KINDS = ["summary", "heading", "key-point", "sequence-step"];
 
@@ -112,20 +113,15 @@ function normalizeLine(raw) {
   };
 }
 
-// Parse the model's JSON into a raw line array. A malformed reply must not crash
-// generation — it yields no lines (degrade gracefully on the foreseen), same as an
-// empty board. Accepts either a bare array or an object wrapping a `lines` array,
-// since models vary in how they frame a top-level list.
+// Parse the model's JSON into a raw line array, via the shared list contract.
+//
+// A malformed reply used to yield [] and be reported as success, so a spent model
+// call surfaced as an empty notes panel and the user was left to guess whether
+// their board was the problem. On a ~20-call-per-day free tier that is the most
+// expensive possible outcome, so an unreadable reply now throws and the caller
+// says what happened.
 function parseLines(text) {
-  let obj;
-  try {
-    obj = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (Array.isArray(obj)) return obj;
-  if (obj && Array.isArray(obj.lines)) return obj.lines;
-  return [];
+  return parseList(text, { key: "lines" });
 }
 
 // Pull the JSON text out of a central-module result. { status:"ok", response }
@@ -149,7 +145,20 @@ function buildRequest(userId, transcription, noteType) {
         parts: [{ text: instruction }, { text: `Transcription:\n${source}` }],
       },
     ],
-    config: { responseMimeType: "application/json" },
+    config: {
+      responseMimeType: "application/json",
+      // Pin the envelope rather than only asking for it in the prompt: a JSON mime
+      // type constrains that the reply IS json, not its shape, and a reframed
+      // envelope used to parse as "no lines".
+      responseSchema: listSchema(
+        {
+          text: { type: "string" },
+          kind: { type: "string", enum: NOTE_KINDS },
+          sourceElementIds: { type: "array", items: { type: "string" } },
+        },
+        ["text", "kind"]
+      ),
+    },
   };
 }
 

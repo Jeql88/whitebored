@@ -569,10 +569,21 @@ export default function WhiteboardEditor() {
         .then((r) => setCoverageReport(r?.report || null))
         .catch(() => {});
     };
-    const onErr = ({ boardId }) => {
+    const onErr = ({ boardId, error }) => {
       if (boardId !== whiteboardId) return;
       setNotesBusy(false);
-      showToast("Couldn't generate notes. Try again.");
+      // One message for every cause left the user with nothing to act on. A spent
+      // daily quota, an unreadable reply and a real bug call for different
+      // responses, and only the first is the user's to solve.
+      const messages = {
+        quota_exhausted:
+          "The daily AI limit for this key has run out. Notes will work again tomorrow.",
+        rate_limited: "The AI is rate-limited right now — wait a moment and try again.",
+        unreadable_reply: "The AI's reply came back garbled. Try generating again.",
+        forbidden: "You don't have access to this board.",
+        regeneration_unavailable: "Regenerating notes isn't available right now.",
+      };
+      showToast(messages[error] || "Couldn't generate notes. Try again.");
     };
 
     socket.on("notesLine", onLine);

@@ -138,7 +138,10 @@ test("extractTopics drops a malformed topic (missing label or page range) rather
   assert.equal(topics[0].label, "Good topic");
 });
 
-test("a malformed model reply yields no topics rather than crashing (degrade gracefully)", async () => {
+test("a malformed model reply fails loudly instead of reporting no topics", async () => {
+  // "This document has no topics" is a real finding; "the reply was unreadable" is
+  // a failure. Returning [] for both hid a spent model call behind a plausible
+  // answer.
   const stub = createGeminiStub();
   stub.enqueue({ text: "not json" });
   const gemini = createGemini({ client: stub });
@@ -148,8 +151,10 @@ test("a malformed model reply yields no topics rather than crashing (degrade gra
     documents: fakeDocuments(doc()),
     userId: "u1",
   });
-  const { topics } = await coverage.extractTopics("docObjId");
-  assert.equal(topics.length, 0);
+  await assert.rejects(
+    () => coverage.extractTopics("docObjId"),
+    (err) => err.unusableReply === true
+  );
 });
 
 // --- semantic coverage at report time (story 30) ---------------------------------
@@ -300,4 +305,52 @@ test("a genuinely new topic gets a fresh id; a vanished topic does not linger", 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].label, "Brand new topic");
   assert.notEqual(merged[0].id, "topic-0");
+});
+
+test("judging N topics costs ONE retrieval, not one per topic", async () => {
+  // Coverage retrieved once PER TOPIC, so a 20-topic document spent 20 calls of a
+  // ~20-call-per-day free tier in a single pass — the whole day's budget for one
+  // click. The retrievals share a scope and a candidate set, so they batch.
+  let retrieveManyCalls = 0;
+  let perQueryCalls = 0;
+  const coverage = createCoverage({
+    gemini: createGemini({ client: createGeminiStub() }),
+    retrieve: async () => {
+      perQueryCalls += 1;
+      return [];
+    },
+    retrieveMany: async (labels) => {
+      retrieveManyCalls += 1;
+      return labels.map(() => []);
+    },
+    documents: fakeDocuments(doc()),
+    userId: "u1",
+  });
+
+  const topics = ["alpha", "beta", "gamma", "delta"].map((label) => ({
+    label,
+    pageStart: 1,
+    pageEnd: 1,
+  }));
+  const { report } = await coverage.report({ boardId: "b1", topics });
+
+  assert.equal(retrieveManyCalls, 1, "one batched retrieval for the whole pass");
+  assert.equal(perQueryCalls, 0, "no per-topic retrieval when batching is available");
+  assert.equal(report.topics.length, 4, "every topic is still judged");
+});
+
+test("coverage still works when the retriever cannot batch", async () => {
+  // `retrieve` is an injected seam; a caller may supply a one-query function only.
+  const coverage = createCoverage({
+    gemini: createGemini({ client: createGeminiStub() }),
+    retrieve: async () => [],
+    documents: fakeDocuments(doc()),
+    userId: "u1",
+  });
+
+  const { report } = await coverage.report({
+    boardId: "b1",
+    topics: [{ label: "alpha", pageStart: 1, pageEnd: 1 }],
+  });
+  assert.equal(report.topics.length, 1);
 });

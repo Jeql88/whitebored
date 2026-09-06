@@ -31,6 +31,17 @@ const { lineFromChatMessage } = require("./fromChat");
 // fakes; the production wiring in socket/index.js passes the real generator, store,
 // and access check.
 
+// Classify a generation failure into something the UI can phrase usefully.
+function errorCodeFor(err) {
+  const raw = String(err?.message || "");
+  if (err?.quotaExhausted || /PerDay|per day|generate_content_free_tier_requests/i.test(raw)) {
+    return "quota_exhausted";
+  }
+  if (err?.unusableReply) return "unreadable_reply";
+  if (/RESOURCE_EXHAUSTED|429/.test(raw)) return "rate_limited";
+  return "generation_failed";
+}
+
 function registerNotesHandlers(socket, { generator, regenerator, store, canAccess } = {}) {
   if (!generator || typeof generator.generate !== "function") {
     throw new Error("registerNotesHandlers: a notes generator is required");
@@ -78,7 +89,10 @@ function registerNotesHandlers(socket, { generator, regenerator, store, canAcces
       // limits into a working state, so this is a real fault) — fail loud to the
       // client rather than leaving it spinning.
       console.error("[notes] generation failed:", err.message);
-      socket.emit("notesError", { boardId, error: "generation_failed" });
+      // Name the cause. "generation_failed" covered a spent daily quota, an
+      // unreadable model reply and a real bug alike, so the UI could only offer one
+      // useless message for three situations the user would act on differently.
+      socket.emit("notesError", { boardId, error: errorCodeFor(err) });
     }
   });
 
@@ -127,7 +141,7 @@ function registerNotesHandlers(socket, { generator, regenerator, store, canAcces
       socket.emit("notesDone", { boardId, record });
     } catch (err) {
       console.error("[notes] regeneration failed:", err.message);
-      socket.emit("notesError", { boardId, error: "regeneration_failed" });
+      socket.emit("notesError", { boardId, error: errorCodeFor(err) });
     }
   });
 

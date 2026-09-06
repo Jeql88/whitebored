@@ -55,6 +55,7 @@
 const { reconcile } = require("../regeneration");
 const { freshSchedule } = require("./sm2");
 const { verifyCard, cardSourceText } = require("./verify");
+const { listSchema, parseList } = require("../gemini/jsonList");
 
 const DEFAULT_DECK = "notes";
 
@@ -87,16 +88,10 @@ function questionFingerprint(card) {
 // Parse the model's JSON into a raw card array. A malformed reply must not crash
 // generation — it yields no model cards (degrade gracefully), same as empty notes.
 // Accepts a bare array or an object wrapping a `cards` array (models vary).
+// An unreadable reply throws rather than yielding [] — an empty deck reported as
+// success spends a model call and tells the user nothing about why.
 function parseCards(text) {
-  let obj;
-  try {
-    obj = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (Array.isArray(obj)) return obj;
-  if (obj && Array.isArray(obj.cards)) return obj.cards;
-  return [];
+  return parseList(text, { key: "cards" });
 }
 
 // Normalize a raw model card into the card body (schedule + id are added later). A
@@ -144,7 +139,19 @@ function buildRequest(userId, notes) {
         parts: [{ text: CARD_FENCE }, { text: `Notes:\n${source}` }],
       },
     ],
-    config: { responseMimeType: "application/json" },
+    config: {
+      responseMimeType: "application/json",
+      // Pin the envelope: a JSON mime type constrains that the reply IS json, not
+      // its shape, and a reframed envelope parsed as "no cards".
+      responseSchema: listSchema(
+        {
+          question: { type: "string" },
+          answer: { type: "string" },
+          sourceElementIds: { type: "array", items: { type: "string" } },
+        },
+        ["question", "answer"]
+      ),
+    },
   };
 }
 

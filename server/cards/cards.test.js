@@ -181,13 +181,18 @@ test("verification drops un-traceable cards with the model stubbed (D17 — the 
   );
 });
 
-test("a malformed model reply yields a collection with no fact cards, not a crash", async () => {
+test("a malformed model reply fails loudly instead of yielding an empty deck", async () => {
+  // An empty deck reported as success spends a model call and tells the user
+  // nothing: "no cards could be made from these notes" and "the reply was
+  // unreadable" are different answers and must not look identical.
   const stub = createGeminiStub();
   stub.enqueue({ text: "not json at all" });
   const gen = makeGenerator(stub);
 
-  const collection = await gen.generate({ notes: notes({ text: "x", ids: ["f0"] }), boardId: "b1" });
-  assert.deepEqual(collection.cards, []);
+  await assert.rejects(
+    () => gen.generate({ notes: notes({ text: "x", ids: ["f0"] }), boardId: "b1" }),
+    (err) => err.unusableReply === true
+  );
 });
 
 test("a throttled (deferred) generation still resolves to a collection (story 56)", async () => {

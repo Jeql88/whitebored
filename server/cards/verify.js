@@ -48,13 +48,20 @@ function verifyCard(card, source) {
   const ids = Array.isArray(card.sourceElementIds) ? card.sourceElementIds : [];
   if (ids.length === 0) return false;
 
-  const terms = keyTerms({ text: card.answer });
-  if (terms.length === 0) return false;
-
   const haystack = new Set(
     tokenize(typeof source === "string" ? source : cardSourceText(source))
   );
-  return terms.every((t) => haystack.has(t));
+
+  // An answer made ENTIRELY of connective words ("new", "two", "before") has no
+  // key terms to check, but it is not therefore untraceable — a one-word answer is
+  // exactly what a good flashcard often has. Falling back to the raw tokens keeps
+  // such a card verifiable against the notes instead of dropping it for being
+  // short, while a multi-word answer is still judged on its substantive terms.
+  const terms = keyTerms({ text: card.answer });
+  const checked = terms.length > 0 ? terms : tokenize(card.answer);
+  if (checked.length === 0) return false;
+
+  return checked.every((t) => haystack.has(t));
 }
 
 module.exports = { verifyCard, cardSourceText };

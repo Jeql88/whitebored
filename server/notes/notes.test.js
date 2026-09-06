@@ -226,17 +226,41 @@ test("an unknown kind degrades to key-point rather than dropping the line", asyn
   assert.ok(NOTE_KINDS.includes(record.lines[0].kind));
 });
 
-test("a malformed model reply yields an empty notes record, not a crash", async () => {
+test("a malformed model reply fails loudly instead of yielding empty notes", async () => {
+  // It used to return an empty record, which the UI showed as "no notes" — so a
+  // spent model call looked like a board with nothing on it, and the user was left
+  // to guess whether their handwriting was at fault. On a ~20-call-per-day free
+  // tier, a call that silently produces nothing is the worst outcome available.
   const stub = createGeminiStub();
   stub.enqueue({ text: "this is not json" });
   const gen = makeGenerator(stub);
 
+  await assert.rejects(
+    () => gen.generate({ transcription: transcription("anything"), boardId: "b1" }),
+    (err) => err.unusableReply === true
+  );
+});
+
+test("a model reply wrapped or fenced differently is still read, not discarded", async () => {
+  // The reply envelope is the thing models vary most, and every variant used to
+  // parse as "no lines" — the same fault that emptied the board transcription.
+  const stub = createGeminiStub();
+  stub.enqueue({
+    text: [
+      "```json",
+      '{"lines":[{"text":"Mitosis has four phases","kind":"key-point","sourceElementIds":[]}]}',
+      "```",
+    ].join(String.fromCharCode(10)),
+  });
+  const gen = makeGenerator(stub);
+
   const record = await gen.generate({
-    transcription: transcription("anything"),
+    transcription: transcription("Mitosis has four phases"),
     boardId: "b1",
   });
 
-  assert.deepEqual(record.lines, []);
+  assert.equal(record.lines.length, 1);
+  assert.equal(record.lines[0].text, "Mitosis has four phases");
 });
 
 test("a throttled (deferred) generation still resolves to a record (story 56)", async () => {
@@ -562,4 +586,49 @@ test("regenerateNotes without a regenerator wired reports an error rather than h
 
   const err = socket.emitted.find((e) => e.event === "notesError");
   assert.ok(err, "expected notesError when no regenerator is configured");
+});
+
+// --- The grounding gate must not punish ordinary English ----------------------
+
+test("a line whose facts are all on the board survives ordinary connective wording", async () => {
+  // The gate required EVERY non-stopword verbatim, so a faithful line was dropped
+  // for using a verb the board never literally wrote. The model did its job and
+  // the user saw a near-empty panel, with a model call already spent — the most
+  // expensive failure available on a ~20-call-per-day tier.
+  const stub = createGeminiStub();
+  stub.enqueue({
+    text: JSON.stringify([
+      { text: "Mitosis produces two daughter cells", kind: "key-point", sourceElementIds: [] },
+    ]),
+  });
+  const gen = makeGenerator(stub);
+
+  const record = await gen.generate({
+    transcription: transcription(
+      "Mitosis has four phases. The cell divides into two daughter cells."
+    ),
+    boardId: "b1",
+  });
+
+  assert.equal(record.lines.length, 1, "a faithful line must not be dropped");
+});
+
+test("a line asserting something the board never said is still dropped", async () => {
+  // Widening the gate must not weaken grounding: invented CONTENT still shows up
+  // as an unmatched noun or number, and that is what the gate exists to catch.
+  const stub = createGeminiStub();
+  stub.enqueue({
+    text: JSON.stringify([
+      { text: "Meiosis produces four gametes", kind: "key-point", sourceElementIds: [] },
+      { text: "Mitosis takes 90 minutes", kind: "key-point", sourceElementIds: [] },
+    ]),
+  });
+  const gen = makeGenerator(stub);
+
+  const record = await gen.generate({
+    transcription: transcription("Mitosis has four phases."),
+    boardId: "b1",
+  });
+
+  assert.deepEqual(record.lines, [], "invented facts must never reach the notes");
 });

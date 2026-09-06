@@ -377,3 +377,59 @@ test("createRetriever fails loud when a seam is missing", () => {
   assert.throws(() => createRetriever({ gemini, documents }), /chunk store/);
   assert.throws(() => createRetriever({ gemini, chunks }), /document source/);
 });
+
+test("retrieveMany embeds every query in ONE call, and keeps results aligned", async () => {
+  // Coverage judges each topic by retrieving for it. One embedding call per topic
+  // meant a 20-topic document spent a whole day of a ~20-call-per-day free tier in
+  // a single pass, so the batch is the unit that matters.
+  const { retriever, stub } = makeRetriever({
+    d1: {
+      boardId: "b1",
+      pages: [
+        { page: 1, text: "photosynthesis photosynthesis converts light" },
+        { page: 2, text: "mitochondria mitochondria make energy" },
+      ],
+    },
+  });
+  await retriever.indexDocument("d1", { userId: "u1" });
+
+  const before = stub.embedCalls.length;
+  const results = await retriever.retrieveMany(
+    ["photosynthesis", "mitochondria"],
+    { boardId: "b1", userId: "u1" }
+  );
+
+  assert.equal(stub.embedCalls.length - before, 1, "both queries ride one embed call");
+  assert.equal(results.length, 2, "one result list per query, in order");
+  // Each query finds its own page, so the batch did not blur the queries together.
+  assert.equal(results[0][0].page, 1);
+  assert.equal(results[1][0].page, 2);
+});
+
+test("retrieveMany holds a slot for a blank query instead of shifting results", async () => {
+  // Callers zip results back to the queries they asked for, so a dropped slot would
+  // silently misattribute every later topic's coverage.
+  const { retriever } = makeRetriever({
+    d1: { boardId: "b1", pages: [{ page: 1, text: "photosynthesis photosynthesis" }] },
+  });
+  await retriever.indexDocument("d1", { userId: "u1" });
+
+  const results = await retriever.retrieveMany(
+    ["photosynthesis", "", "photosynthesis"],
+    { boardId: "b1", userId: "u1" }
+  );
+  assert.equal(results.length, 3);
+  assert.deepEqual(results[1], [], "a blank query retrieves nothing but keeps its place");
+  assert.ok(results[2].length > 0, "the query after a blank one is unaffected");
+});
+
+test("retrieve() still works and is the one-query case of retrieveMany", async () => {
+  const { retriever } = makeRetriever({
+    d1: { boardId: "b1", pages: [{ page: 1, text: "photosynthesis photosynthesis" }] },
+  });
+  await retriever.indexDocument("d1", { userId: "u1" });
+
+  const hits = await retriever.retrieve("photosynthesis", { boardId: "b1", userId: "u1" });
+  assert.ok(hits.length > 0);
+  assert.equal(hits[0].page, 1);
+});
