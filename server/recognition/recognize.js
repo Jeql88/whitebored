@@ -34,8 +34,9 @@ const MAX_CROPS_PER_REQUEST = 12;
 
 const SCHEMA_INSTRUCTION =
   "You are transcribing handwriting and diagram labels from images. " +
-  "Each image is tagged with a cropId. Return ONLY JSON: an object mapping each " +
-  'cropId to { "segments": [ { "text": string, "uncertain": boolean } ] }. ' +
+  "Each image is tagged with a cropId. Return ONLY a JSON array, one entry per " +
+  'image: { "cropId": string, "segments": [ { "text": string, "uncertain": boolean } ] }. ' +
+  "Use the cropId exactly as given. Include an entry for every cropId you were shown. " +
   // The user reviews the NOTES, not the raw reading, so hedging on a smudged
   // letter helps nobody: read messy handwriting the way a person would, using the
   // surrounding words to settle an ambiguous one. What must not happen is
@@ -51,10 +52,33 @@ const SCHEMA_INSTRUCTION =
 // are written from what was actually read, and a placeholder in the transcription
 // only ever became noise in the notes. The strokes themselves are untouched on the
 // board, so nothing is lost — the user can always redraw or type the word.
+// The model is asked for { segments: [...] }, but a generative model reliably
+// varies the envelope even under a JSON mime type: it returns a bare string, a
+// bare array of segments, or { text: "..." }. Insisting on the one exact shape
+// meant every other reply parsed to NO segments — indistinguishable, in the
+// artifact, from "nothing was legible", and with no readFailure to contradict it.
+// That produced whole-board transcriptions that were silently empty. Accept the
+// shapes a model actually emits; the CONTENT is what matters, not the wrapper.
 function segmentsFrom(answer) {
-  const segs = answer && Array.isArray(answer.segments) ? answer.segments : null;
+  if (answer == null) return [];
+
+  // A bare string reading: "the crop says this".
+  if (typeof answer === "string") {
+    return answer.trim() ? [{ text: answer, uncertain: false }] : [];
+  }
+
+  // A bare array is the segment list itself, without the { segments } wrapper.
+  const segs = Array.isArray(answer)
+    ? answer
+    : Array.isArray(answer.segments)
+      ? answer.segments
+      : answer.text != null || answer.uncertain != null
+        ? [answer] // a single un-wrapped segment object
+        : null;
   if (!segs) return [];
+
   return segs
+    .map((s) => (typeof s === "string" ? { text: s } : s))
     .filter((s) => s && typeof s.text === "string" && s.text.trim())
     .map((s) => ({ text: s.text, uncertain: Boolean(s.uncertain) }));
 }
@@ -70,15 +94,61 @@ async function textOf(result) {
   return typeof response === "string" ? response : response?.text ?? "";
 }
 
+// A cropId as it appears in a reply. The model sometimes answers with the bare
+// member id instead of the "crop-" prefixed one it was given, so both are indexed.
+function indexUnder(out, key, value) {
+  if (typeof key !== "string" || !key) return;
+  out[key] = value;
+  if (key.startsWith("crop-")) out[key.slice(5)] = value;
+  else out[`crop-${key}`] = value;
+}
+
+// Turn whatever the model returned into a flat { cropId -> answer } map.
+//
+// The reply is asked for as a bare object keyed by cropId, but in practice it also
+// arrives wrapped in a container key ({ crops: {...} }, { results: [...] }) or as
+// an ARRAY of per-crop objects carrying their own cropId. Every one of those used
+// to parse as "no crop ids matched", so each crop read back empty while the call
+// itself reported success — a silently blank transcription. Unwrap the common
+// envelopes instead: the reading is there, only the packaging differs.
 function parseBatch(text) {
+  let obj;
   try {
-    const obj = JSON.parse(text);
-    return obj && typeof obj === "object" ? obj : {};
+    obj = JSON.parse(text);
   } catch {
     // A malformed model reply must not crash recognition — every crop simply
     // reads back as an [unclear] gap (degrade gracefully on the foreseen).
     return {};
   }
+  if (!obj || typeof obj !== "object") return {};
+
+  const out = {};
+
+  // An array of per-crop objects, each naming its own crop.
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      if (item && typeof item === "object") {
+        indexUnder(out, item.cropId ?? item.crop_id ?? item.id, item);
+      }
+    }
+    return out;
+  }
+
+  for (const [key, value] of Object.entries(obj)) {
+    // A container key holding the real map/list — recurse into it once.
+    if (!key.startsWith("crop-") && value && typeof value === "object" && !Array.isArray(value)
+        && Object.keys(value).some((k) => k.startsWith("crop-"))) {
+      Object.assign(out, parseBatch(JSON.stringify(value)));
+      continue;
+    }
+    if (!key.startsWith("crop-") && Array.isArray(value)
+        && value.some((v) => v && typeof v === "object" && (v.cropId || v.crop_id))) {
+      Object.assign(out, parseBatch(JSON.stringify(value)));
+      continue;
+    }
+    indexUnder(out, key, value);
+  }
+  return out;
 }
 
 // Build the one multi-image request. Each ink crop contributes its cropId tag and
@@ -101,10 +171,38 @@ function buildRequest(userId, inkCrops) {
     parts.push({ text: `cropId: ${crop.cropId}` });
     parts.push({ inlineData: inlineDataOf(crop.image) });
   }
+  // Pin the reply shape with a responseSchema rather than trusting the prompt.
+  // A JSON mime type alone constrains only that the reply IS json, not its shape,
+  // and the envelope drifted between calls. An ARRAY of per-crop readings is used
+  // because a schema cannot describe an object whose KEYS are dynamic cropIds;
+  // parseBatch indexes it back by cropId.
   return {
     userId,
     contents: [{ role: "user", parts }],
-    config: { responseMimeType: "application/json" },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            cropId: { type: "string" },
+            segments: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  uncertain: { type: "boolean" },
+                },
+                required: ["text"],
+              },
+            },
+          },
+          required: ["cropId", "segments"],
+        },
+      },
+    },
   };
 }
 
@@ -181,13 +279,32 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
           `[recognize] batch read failed, degrading to [unclear]: ${err.message} | crops: ${sizes}`
         );
       }
+      let readCount = 0;
       for (const crop of inkCrops) {
+        const segments = segmentsFrom(byCropId[crop.cropId]);
+        if (segments.length > 0) readCount += 1;
         readings.set(crop.cropId, {
           cropId: crop.cropId,
-          segments: segmentsFrom(byCropId[crop.cropId]),
+          segments,
           sourceElementIds: crop.sourceElementIds,
           bbox: crop.bbox,
         });
+      }
+
+      // Not one crop on the whole board produced a word, yet no call threw. That is
+      // not "your handwriting was illegible" — a board with ink in it reads back
+      // with SOMETHING — it is a systemic failure: an unparsed reply envelope, a
+      // silently truncated response, a safety block. Left unreported it surfaced as
+      // a blank transcription that looked like a working feature finding nothing,
+      // which is the one outcome the user cannot act on. Say so instead.
+      if (readCount === 0 && !readFailure) {
+        readFailure =
+          "The board was read but nothing came back — none of the " +
+          `${inkCrops.length} handwriting crops produced any text.`;
+        console.error(
+          `[recognize] empty read: ${inkCrops.length} ink crops, 0 with text. ` +
+            `Reply keys seen: ${Object.keys(byCropId).slice(0, 10).join(", ") || "(none)"}`
+        );
       }
     }
 

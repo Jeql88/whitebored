@@ -191,3 +191,50 @@ test("strokes genuinely close together still merge into one crop", () => {
   assert.equal(crops.length, 1);
   assert.equal(crops[0].sourceElementIds.length, 2);
 });
+
+test("a stroke that OVERLAPS unrelated writing does not swallow the board", () => {
+  // The real regression behind a 700-element, 2681x1537 crop. Two overlapping
+  // boxes have a gap of ZERO on both axes, so the proximity test passed
+  // unconditionally — an underline, a bracket or a container outline drawn ACROSS
+  // the page therefore merged with every word it spanned, and transitivity then
+  // chained the whole board into one crop. Proximity is only meaningful between
+  // strokes of comparable scale.
+  const crops = groupCrops([
+    // A long underline spanning the page, overlapping both words' boxes.
+    inkEl("underline", { x: 0, y: 20, width: 900, height: 3 }),
+    inkEl("wordA", { x: 10, y: 8, width: 40, height: 16 }),
+    inkEl("wordB", { x: 800, y: 8, width: 40, height: 16 }),
+  ]);
+
+  // The two words are far apart, so they stay separate — and neither is dragged
+  // into the underline's crop.
+  assert.equal(crops.length, 3);
+  for (const c of crops) assert.equal(c.sourceElementIds.length, 1);
+});
+
+test("specks with no readable extent never become crops of their own", () => {
+  // A real board carried crops of 0.85x0 and 0x3.4 px — stray taps and lifted-pen
+  // artefacts. Rasterizing one scales it ~320x into a blank image, and each still
+  // consumed a slot in a 12-image model request, crowding out real handwriting.
+  const crops = groupCrops([
+    inkEl("real", { x: 0, y: 0, width: 40, height: 16 }),
+    inkEl("speck", { x: 600, y: 300, width: 0.85, height: 0 }),
+    inkEl("sliver", { x: 700, y: 400, width: 0, height: 3.4 }),
+    inkEl("dot", { x: 800, y: 500, width: 5.09, height: 1.69 }),
+  ]);
+
+  assert.equal(crops.length, 1);
+  assert.deepEqual(crops[0].sourceElementIds, ["real"]);
+});
+
+test("a speck sitting inside real writing still rides along with it", () => {
+  // Dropping specks must not lose the dot of an i that belongs to a word: it is
+  // only dropped when it is ALONE, never when a real stroke claims it.
+  const crops = groupCrops([
+    inkEl("stem", { x: 0, y: 0, width: 8, height: 16 }),
+    inkEl("tittle", { x: 2, y: -4, width: 1.5, height: 1.5 }),
+  ]);
+
+  assert.equal(crops.length, 1);
+  assert.equal(crops[0].sourceElementIds.length, 2);
+});

@@ -101,6 +101,21 @@ function makeUnionFind(ids) {
 // terms, however tall the neighbouring shape happens to be.
 const GAP_TO_HEIGHT = 1.2; // gap under 1.2x the SMALLER box merges
 const MAX_MERGE_GAP = 60; // px — beyond this, strokes are separate content
+// A stroke this much taller than its neighbour is not writing on the same line —
+// it is an underline, a bracket, a container outline or an arrow drawn ACROSS the
+// text. Its box overlaps everything it spans, and overlap alone used to merge
+// unconditionally (see clusterFreeStrokes), so one such stroke chained the board
+// into a single crop. Scale must be comparable before proximity means anything.
+const MAX_HEIGHT_RATIO = 12;
+// A stroke longer than this relative to its thickness is a RULE, not a letter: an
+// underline, bracket, arrow or box edge. Its bbox overlaps everything it crosses,
+// so it must never be merged by proximity. Letters — including a tittle or a comma
+// — stay well under this.
+const ELONGATED_RATIO = 6;
+// Strokes below this are specks: a stray tap, the dot of an i left behind, a
+// zero-area artefact. They carry no readable content of their own, so they never
+// seed or extend a cluster — they ride along only if a real stroke claims them.
+const MIN_STROKE_EXTENT = 2; // px
 
 // The gap on each axis independently. gapBetween() collapses these into one
 // radial distance, which cannot express "far apart across, but on the same line".
@@ -135,16 +150,51 @@ function clusterFreeStrokes(uf, strokes) {
     for (let j = i + 1; j < strokes.length; j++) {
       const a = strokes[i];
       const b = strokes[j];
-      const smaller = Math.max(1, Math.min(a.height ?? 0, b.height ?? 0));
+
+      const ha = Math.max(0, a.height ?? 0);
+      const hb = Math.max(0, b.height ?? 0);
+      const taller = Math.max(ha, hb);
+      const smaller = Math.max(1, Math.min(ha, hb));
+
+      // An underline, bracket, box outline or arrow drawn ACROSS the page overlaps
+      // the box of every word it spans, and overlapping boxes have a gap of zero on
+      // both axes — so the proximity test below passed unconditionally and
+      // transitivity chained the whole board into one crop.
+      //
+      // What separates such a stroke from ordinary writing is not its size but its
+      // SHAPE: a rule or bracket is extremely elongated (very long on one axis,
+      // nearly flat on the other), while letters — even a tittle, a comma, or a
+      // full stop — are roughly as tall as they are wide. So an elongated stroke is
+      // never merged by proximity, whatever its scale, and a compact speck still
+      // joins the word it belongs to.
+      const elongation = (el) => {
+        const w = Math.max(el.width ?? 0, 0.01);
+        const h = Math.max(el.height ?? 0, 0.01);
+        return Math.max(w, h) / Math.min(w, h);
+      };
+      if (elongation(a) > ELONGATED_RATIO || elongation(b) > ELONGATED_RATIO) continue;
+
+      // Among compact strokes, scale still has to be comparable: a whole scribbled
+      // diagram sitting beside a word is not part of that word.
+      if (taller > smaller * MAX_HEIGHT_RATIO) continue;
+
       const { dx, dy } = gapAxes(a, b);
+
+      // Budgets scale to the TALLER of the two, which is the size of the writing
+      // itself. Scaling to the smaller one meant a tittle, comma or full stop — a
+      // mark 1-2px tall — could never reach the letter it belongs to, because its
+      // own size set a sub-pixel budget. Using the taller box is safe now that
+      // elongated rules are excluded above: the runaway merges it used to cause all
+      // came from long strokes, which no longer take part in proximity at all.
+      const scale = taller;
 
       // Same line, next word: a wide horizontal reach but the strokes must
       // actually overlap vertically, which is what keeps it on one line.
       const sameLine =
-        dy <= smaller * 0.5 && dx <= Math.min(smaller * GAP_TO_HEIGHT * 2, MAX_MERGE_GAP);
+        dy <= scale * 0.5 && dx <= Math.min(scale * GAP_TO_HEIGHT * 2, MAX_MERGE_GAP);
       // Next line of the same block: directly above/below, within a line height.
       const nextLine =
-        dx <= smaller * 0.5 && dy <= Math.min(smaller * GAP_TO_HEIGHT, MAX_MERGE_GAP);
+        dx <= scale * 0.5 && dy <= Math.min(scale * GAP_TO_HEIGHT, MAX_MERGE_GAP);
 
       if (sameLine || nextLine) uf.union(a.id, b.id);
     }
@@ -232,11 +282,22 @@ function groupCrops(elements = []) {
   }
   for (const members of components.values()) {
     const ids = members.map((el) => el.id);
+    const bbox = bboxOf(members);
+    // A crop whose ENTIRE extent is a speck holds no readable content: a stray
+    // tap, a zero-area artefact, the leftover dot of a lifted pen. Rasterizing one
+    // scales it ~320x into a blank image the model cannot read, and every such
+    // crop still costs a slot in a 12-image request and a share of the per-user
+    // model budget — crowding out the real handwriting on a busy board. Dropping
+    // it loses nothing: the strokes stay on the board untouched, exactly as an
+    // unread crop does.
+    // Either dimension being degenerate is enough: a 0x3.4 sliver is as unreadable
+    // as a 1x1 dot, and rasterizing it just stretches nothing into a tall blank.
+    if (bbox.width < MIN_STROKE_EXTENT || bbox.height < MIN_STROKE_EXTENT) continue;
     crops.push({
       cropId: cropIdFor(ids),
       kind: "ink",
       sourceElementIds: ids,
-      bbox: bboxOf(members),
+      bbox,
     });
   }
 

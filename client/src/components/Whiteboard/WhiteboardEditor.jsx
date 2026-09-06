@@ -671,7 +671,15 @@ export default function WhiteboardEditor() {
         0
       );
       if (words === 0) {
-        showToast("Couldn't read anything on the board — try writing a bit larger.");
+        // Two different failures land here and they need different advice. If the
+        // server reported a readFailure, the read itself broke — telling the user
+        // to write larger blames their handwriting for our bug and sends them off
+        // rewriting a board that was perfectly legible.
+        showToast(
+          artifact.readFailure
+            ? "The board couldn't be read — this one's on us. Please try again."
+            : "Couldn't read anything on the board — try writing a bit larger."
+        );
         return;
       }
 

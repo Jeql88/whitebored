@@ -242,3 +242,81 @@ test("a large board is split across several requests, not one oversized one", as
   assert.equal(out[0].segments[0].text, "read 0");
   assert.equal(out[29].segments[0].text, "read 29");
 });
+
+// --- Reply-envelope tolerance -------------------------------------------------
+// The bug these cover: a real board came back with EVERY crop's segments empty
+// while the call itself reported success and set no readFailure. The model had
+// read the board fine — the parser only accepted one exact envelope, so any other
+// shape silently produced nothing, which is indistinguishable in the artifact
+// from "your handwriting was illegible".
+
+// Drive the recognizer with a raw reply string and return the first crop's segments.
+async function segmentsForReply(rawJson) {
+  const stub = createGeminiStub();
+  stub.enqueue({ text: rawJson });
+  const out = await makeRecognizer(stub).recognize([inkCrop("crop-a", ["a"])]);
+  return out[0].segments;
+}
+
+test("a reply wrapped in a container key is still read", async () => {
+  const segs = await segmentsForReply(
+    JSON.stringify({ crops: { "crop-a": { segments: [{ text: "mitosis", uncertain: false }] } } })
+  );
+  assert.deepEqual(segs, [{ text: "mitosis", uncertain: false }]);
+});
+
+test("a reply as an array of per-crop objects is still read", async () => {
+  const segs = await segmentsForReply(
+    JSON.stringify([{ cropId: "crop-a", segments: [{ text: "mitosis", uncertain: true }] }])
+  );
+  assert.deepEqual(segs, [{ text: "mitosis", uncertain: true }]);
+});
+
+test("a reply naming the crop without its 'crop-' prefix is still read", async () => {
+  const segs = await segmentsForReply(
+    JSON.stringify([{ cropId: "a", segments: [{ text: "mitosis" }] }])
+  );
+  assert.deepEqual(segs, [{ text: "mitosis", uncertain: false }]);
+});
+
+test("a bare string or bare segment list for a crop is still read", async () => {
+  assert.deepEqual(await segmentsForReply(JSON.stringify({ "crop-a": "mitosis" })), [
+    { text: "mitosis", uncertain: false },
+  ]);
+  assert.deepEqual(await segmentsForReply(JSON.stringify({ "crop-a": [{ text: "mitosis" }] })), [
+    { text: "mitosis", uncertain: false },
+  ]);
+});
+
+test("a genuinely empty reading stays empty and is not invented", async () => {
+  // Tolerance must not become guessing: nothing legible still means no segments.
+  assert.deepEqual(await segmentsForReply(JSON.stringify([])), []);
+});
+
+test("a board where NO crop reads back reports a readFailure, not a silent blank", async () => {
+  // Every crop empty with no error thrown is a systemic failure (an unparsed
+  // envelope, a truncated reply, a safety block) — never "nothing was legible".
+  // Reported as success it looked like a working feature that found nothing.
+  const stub = createGeminiStub();
+  stub.enqueue({ text: JSON.stringify({ unrelated: "shape" }) });
+  const out = await makeRecognizer(stub).recognize([
+    inkCrop("crop-a", ["a"]),
+    inkCrop("crop-b", ["b"]),
+  ]);
+
+  assert.equal(out.length, 2);
+  assert.deepEqual(out[0].segments, []);
+  assert.ok(out.readFailure, "an all-empty read must surface a readFailure");
+});
+
+test("a partial read does NOT report a failure — some crops are legitimately blank", async () => {
+  const stub = createGeminiStub();
+  stub.enqueue({ text: JSON.stringify([{ cropId: "crop-a", segments: [{ text: "read" }] }]) });
+  const out = await makeRecognizer(stub).recognize([
+    inkCrop("crop-a", ["a"]),
+    inkCrop("crop-b", ["b"]),
+  ]);
+
+  assert.deepEqual(out[1].segments, []);
+  assert.equal(out.readFailure, null);
+});
