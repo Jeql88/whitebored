@@ -610,14 +610,21 @@ export default function WhiteboardEditor() {
   // when there is genuinely something to correct.
   const readBoard = useCallback(async () => {
     const api = apiRef.current;
-    if (!api) return null;
+    if (!api) {
+      console.warn("[whitebored] generate: the canvas is not ready yet");
+      return null;
+    }
     const els = api.getSceneElements();
+    console.info("[whitebored] generate: scene elements =", els.length);
     if (!els.length) {
       showToast("Nothing on the board to read yet.");
       return null;
     }
 
     const crops = await buildBoardCrops(els, api.getFiles());
+    // Grouping can legitimately yield nothing (e.g. only deleted elements), and
+    // that silently looked identical to the button not working at all.
+    console.info("[whitebored] generate: crops =", crops.length, crops.map((c) => c.kind));
     if (!crops.length) {
       showToast("Nothing readable found on the board.");
       return null;
@@ -643,12 +650,31 @@ export default function WhiteboardEditor() {
     try {
       const artifact = await readBoard();
       if (!artifact) return;
+      console.info(
+        "[whitebored] generate: read",
+        artifact.entries?.length ?? 0,
+        "entries;",
+        (artifact.entries || []).reduce((n, e) => n + (e.segments?.length || 0), 0),
+        "segments"
+      );
 
       // Straight to notes. The AI reads the board as well as it can and writes
       // notes from that; there is no correction step in between. What still holds
       // is the grounding fence — a note line must trace to text actually read from
       // the board, so the model cannot invent content, only misread it.
       setTranscript(artifact);
+
+      // A read that found no text at all cannot produce notes, and generating from
+      // it would just spin and end with an empty panel. Say so instead.
+      const words = (artifact.entries || []).reduce(
+        (n, e) => n + (e.segments || []).length,
+        0
+      );
+      if (words === 0) {
+        showToast("Couldn't read anything on the board — try writing a bit larger.");
+        return;
+      }
+
       generateNotesFrom(artifact);
     } catch {
       showToast("Couldn't read the board. Try again.");
