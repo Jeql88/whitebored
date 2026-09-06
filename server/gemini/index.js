@@ -37,6 +37,13 @@ function isRateLimit(err) {
   return err && err.status === 429;
 }
 
+// A 429 that will not clear by waiting (the free tier's per-DAY cap). Retrying it
+// spends the caller's whole backoff budget — up to a minute of a user staring at a
+// spinner — to reach the identical failure, so it is surfaced immediately.
+function isQuotaExhausted(err) {
+  return Boolean(err && err.quotaExhausted);
+}
+
 function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
   if (!client || typeof client.generate !== "function") {
     throw new Error("createGemini: a client with generate(request) is required");
@@ -86,6 +93,7 @@ function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
       try {
         return await client.generate(request);
       } catch (err) {
+        if (isQuotaExhausted(err)) throw err; // waiting cannot help — fail now
         if (!isRateLimit(err) || attempt >= backoffCfg.maxRetries) throw err;
         const wait =
           err.retryAfterMs != null
@@ -119,6 +127,7 @@ function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
       try {
         return await client.embed(request);
       } catch (err) {
+        if (isQuotaExhausted(err)) throw err; // waiting cannot help — fail now
         if (!isRateLimit(err) || attempt >= backoffCfg.maxRetries) throw err;
         const wait =
           err.retryAfterMs != null

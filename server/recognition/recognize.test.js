@@ -209,13 +209,41 @@ test("a failed batch call yields empty readings, not a thrown read", async () =>
   assert.ok(out.readFailure, "the failure reason is reported");
 });
 
-test("a large board is split across several requests, not one oversized one", async () => {
-  // 157 crops in a single request timed out on the client and risked the body
-  // limit. Chunking bounds each request; the readings must still come back keyed
-  // correctly and in caller order.
+test("an ordinary board is read in ONE request, not split into many", async () => {
+  // The free tier allows only ~20 generate calls PER DAY. Splitting a board into
+  // 12-image requests spent that in one or two clicks: the early chunks read fine
+  // and the tail came back 429, which is what a half-empty transcription was.
+  // A whole ordinary board must therefore cost exactly one call.
   const stub = createGeminiStub();
   const crops = [];
-  for (let i = 0; i < 30; i++) {
+  const answer = [];
+  for (let i = 0; i < 40; i++) {
+    crops.push({
+      cropId: `c${i}`,
+      kind: "ink",
+      image: "data:image/png;base64,AAAA",
+      sourceElementIds: [`f${i}`],
+      bbox: {},
+    });
+    answer.push({ cropId: `c${i}`, segments: [{ text: `read ${i}`, uncertain: false }] });
+  }
+  stub.enqueue({ text: JSON.stringify(answer) });
+
+  const out = await createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" })
+    .recognize(crops);
+
+  assert.equal(stub.calls.length, 1, "a 40-crop board must cost a single request");
+  assert.equal(out.length, 40);
+  assert.equal(out[0].segments[0].text, "read 0");
+  assert.equal(out[39].segments[0].text, "read 39");
+});
+
+test("a pathological board still splits rather than sending one unbounded request", async () => {
+  // The per-request bound is raised, not removed: a board far beyond what one
+  // request can carry must still be chunked, keyed correctly and kept in order.
+  const stub = createGeminiStub();
+  const crops = [];
+  for (let i = 0; i < 250; i++) {
     crops.push({
       cropId: `c${i}`,
       kind: "ink",
@@ -224,23 +252,22 @@ test("a large board is split across several requests, not one oversized one", as
       bbox: {},
     });
   }
-  // Each chunk gets its own canned reply covering the ids it was given.
-  for (let start = 0; start < 30; start += 12) {
-    const answer = {};
-    for (let i = start; i < Math.min(start + 12, 30); i++) {
-      answer[`c${i}`] = { segments: [{ text: `read ${i}`, uncertain: false }] };
-    }
-    stub.enqueue({ text: JSON.stringify(answer) });
+  // Reply to whatever chunks it chooses, without assuming a chunk size.
+  for (let start = 0; start < 250; start += 1) {
+    stub.enqueue({
+      text: JSON.stringify(
+        crops.map((c, i) => ({ cropId: c.cropId, segments: [{ text: `read ${i}` }] }))
+      ),
+    });
   }
 
   const out = await createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" })
     .recognize(crops);
 
-  // More than one request went out, and every crop still came back in order.
-  assert.ok(stub.calls.length > 1, "expected the crops to be split across requests");
-  assert.equal(out.length, 30);
+  assert.ok(stub.calls.length > 1, "expected a pathological board to be split");
+  assert.equal(out.length, 250);
   assert.equal(out[0].segments[0].text, "read 0");
-  assert.equal(out[29].segments[0].text, "read 29");
+  assert.equal(out[249].segments[0].text, "read 249");
 });
 
 // --- Reply-envelope tolerance -------------------------------------------------

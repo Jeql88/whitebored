@@ -20,14 +20,51 @@
 // reproduces it, so the fake stays faithful to this real error mode.
 
 // Pull a Retry-After (seconds) out of the SDK error if present, in ms.
+// The SDK does not surface a Retry-After header for a quota 429 — it puts the
+// delay in the JSON error BODY, as a RetryInfo detail ("retryDelay":"49s") and in
+// the message ("Please retry in 49.58s"). Reading only the header meant every
+// quota error fell back to a blind exponential backoff that ignored what the API
+// actually asked for.
+function retryDelayFromBody(err) {
+  const raw = typeof err?.message === "string" ? err.message : "";
+  let body = null;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    body = null;
+  }
+  const details = body?.error?.details;
+  if (Array.isArray(details)) {
+    for (const d of details) {
+      const secs = /^([\d.]+)s$/.exec(String(d?.retryDelay ?? ""));
+      if (secs) return Number(secs[1]) * 1000;
+    }
+  }
+  const inMessage = /retry in ([\d.]+)\s*s/i.exec(raw);
+  if (inMessage) return Number(inMessage[1]) * 1000;
+  return undefined;
+}
+
+// Is this a quota that will NOT free up on its own within a request's lifetime?
+// The free tier's per-DAY cap reports the same 429 as a per-minute burst, but
+// retrying it is pointless: it burns the caller's time and the backoff budget to
+// arrive at the same failure. Distinguish them so a daily cap fails fast and
+// honestly, while a per-minute limit still retries as before.
+function isDailyQuota(err) {
+  const raw = typeof err?.message === "string" ? err.message : "";
+  return /PerDay|per day|generate_content_free_tier_requests/i.test(raw);
+}
+
 function retryAfterMsFrom(err) {
   const header =
     err?.retryAfter ??
     err?.response?.headers?.get?.("retry-after") ??
     err?.headers?.["retry-after"];
-  if (header == null) return undefined;
-  const secs = Number(header);
-  return Number.isFinite(secs) ? secs * 1000 : undefined;
+  if (header != null) {
+    const secs = Number(header);
+    if (Number.isFinite(secs)) return secs * 1000;
+  }
+  return retryDelayFromBody(err);
 }
 
 function normalizeError(err) {
@@ -42,6 +79,8 @@ function normalizeError(err) {
     e.cause = err;
     const retryAfterMs = retryAfterMsFrom(err);
     if (retryAfterMs != null) e.retryAfterMs = retryAfterMs;
+    // A daily cap is marked so the backoff does not retry into a wall.
+    if (isDailyQuota(err)) e.quotaExhausted = true;
     return e;
   }
   return err; // fail loud on everything else — propagate unchanged
@@ -104,4 +143,4 @@ function createRealClient({ apiKey, model, embedModel = DEFAULT_EMBED_MODEL } = 
 // Exported so a test can pin the faithfulness contract: a real Gemini 429 must
 // normalize to the same { status: 429, retryAfterMs? } shape the stub fakes and
 // the central module retries on.
-module.exports = { createRealClient, normalizeError, DEFAULT_EMBED_MODEL };
+module.exports = { createRealClient, normalizeError, retryAfterMsFrom, isDailyQuota, DEFAULT_EMBED_MODEL };

@@ -164,3 +164,21 @@ test("a persistent 429 gives up after maxRetries and propagates", async () => {
   await assertion;
   assert.equal(stub.calls.length, 3);
 });
+
+test("a per-day quota 429 fails immediately instead of exhausting the backoff", async () => {
+  // Retrying a daily cap spends the whole backoff budget — up to a minute of the
+  // user watching a spinner — to arrive at the identical failure. It must surface
+  // at once, and cost exactly one call.
+  const stub = createGeminiStub();
+  const exhausted = Object.assign(new Error("Quota exceeded ... PerDay ..."), {
+    status: 429,
+    quotaExhausted: true,
+  });
+  stub.enqueueError(exhausted);
+
+  const clock = createFakeClock();
+  const gemini = createGemini({ client: stub, clock });
+
+  await assert.rejects(() => gemini.generate({ userId: "u1" }), /Quota exceeded/);
+  assert.equal(stub.calls.length, 1, "a daily cap must not be retried");
+});

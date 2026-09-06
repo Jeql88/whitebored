@@ -27,10 +27,18 @@
 
 // What we ask the model to return, stated in the prompt so the grounding lives
 // server-side. Kept terse; tests assert on the RESULT, never on this string.
-// How many images ride in one model request. Bounded so a large board becomes
-// several parallel requests instead of one that times out or exceeds the body
-// limit.
-const MAX_CROPS_PER_REQUEST = 12;
+// How many images ride in one model request.
+//
+// This is a REQUEST budget, not a size budget. The Gemini free tier allows only
+// ~20 generate calls PER DAY, so chunking a board into 12-image requests spent a
+// user's entire daily quota in one or two clicks: a 26-crop board took 3 calls, and
+// the tail chunks came back 429 RESOURCE_EXHAUSTED while the early ones read
+// perfectly. That is what a half-empty transcription actually looked like.
+//
+// Modern Gemini models take hundreds of images in a single request, so a whole
+// board should be ONE call. The bound is kept high rather than removed so a
+// pathological board still splits rather than exceeding the request limit outright.
+const MAX_CROPS_PER_REQUEST = 100;
 
 const SCHEMA_INSTRUCTION =
   "You are transcribing handwriting and diagram labels from images. " +
@@ -46,6 +54,19 @@ const SCHEMA_INSTRUCTION =
   "context to resolve an ambiguous letter or word rather than hedging. Omit a " +
   "cropId entirely only if there is genuinely nothing legible in it. " +
   "Read only what is drawn; never invent, summarize, or add anything.";
+
+// Turn a failure into something worth showing a person. The raw Gemini error is a
+// wall of JSON quoting quota metrics and doc links; shown in a toast it tells the
+// user nothing they can act on. The one case they CAN act on is a spent quota, so
+// it is named plainly and separated from "the read broke".
+function readableFailure(err) {
+  const raw = String(err?.message || err || "");
+  if (err?.quotaExhausted || /PerDay|per day|generate_content_free_tier_requests/i.test(raw)) {
+    return "DAILY_QUOTA";
+  }
+  if (/RESOURCE_EXHAUSTED|429/.test(raw)) return "RATE_LIMITED";
+  return raw.slice(0, 200);
+}
 
 // Normalize the model's per-crop answer into the D5 segment list. A crop the model
 // could not read yields NO segments rather than an "[unclear]" placeholder: notes
@@ -258,7 +279,7 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
             } catch (err) {
               // One bad chunk must not lose the rest of the board.
               console.error("[recognize] chunk failed:", err.message);
-              readFailure = err.message || String(err);
+              readFailure = readableFailure(err);
               return {};
             }
           })
@@ -268,7 +289,7 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
         // Record why, so the caller can tell the user "the read failed" instead of
         // silently showing [unclear] everywhere, which looks like the AI simply
         // could not read their handwriting.
-        readFailure = err.message || String(err);
+        readFailure = readableFailure(err);
         // Log the crop sizes with the failure: "Unable to process input image"
         // means the model rejected one of these, and the dimensions are what
         // distinguishes a too-small crop from a malformed one.

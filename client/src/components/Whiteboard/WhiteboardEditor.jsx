@@ -599,6 +599,18 @@ export default function WhiteboardEditor() {
     [whiteboardId, noteType]
   );
 
+  // A read failure the user can act on. The AI quota is the one cause they can do
+  // something about (wait, or upgrade the key), and it is invisible unless named:
+  // the raw error is a wall of JSON about quota metrics, and "couldn't read your
+  // board" wrongly implies their handwriting was the problem.
+  const readFailureMessage = (reason) => {
+    if (reason === "DAILY_QUOTA")
+      return "The daily AI limit for this key has run out. Notes will work again tomorrow.";
+    if (reason === "RATE_LIMITED")
+      return "The AI is rate-limited right now — wait a moment and try again.";
+    return "The board couldn't be read — this one's on us. Please try again.";
+  };
+
   // ONE action, whole pipeline (D3 preserved). Reading the board and writing notes
   // used to be two deliberate steps with a mandatory review between them, so the
   // shortest path to notes was four clicks. It is now a single "Generate notes":
@@ -638,7 +650,7 @@ export default function WhiteboardEditor() {
     // genuinely illegible handwriting. Say which it was.
     if (result.readFailure) {
       console.error("[whitebored] board read failed:", result.readFailure);
-      showToast("Couldn't read the drawings — see console for details.");
+      showToast(readFailureMessage(result.readFailure));
     }
     return result.artifact;
   }, [whiteboardId]);
@@ -677,7 +689,7 @@ export default function WhiteboardEditor() {
         // rewriting a board that was perfectly legible.
         showToast(
           artifact.readFailure
-            ? "The board couldn't be read — this one's on us. Please try again."
+            ? readFailureMessage(artifact.readFailure)
             : "Couldn't read anything on the board — try writing a bit larger."
         );
         return;
