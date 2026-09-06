@@ -182,3 +182,55 @@ test("a per-day quota 429 fails immediately instead of exhausting the backoff", 
   await assert.rejects(() => gemini.generate({ userId: "u1" }), /Quota exceeded/);
   assert.equal(stub.calls.length, 1, "a daily cap must not be retried");
 });
+
+test("a daily budget refuses the call up front instead of spending it to be told 429", async () => {
+  // The free tier's binding limit is a DAILY cap, which the per-minute throttle
+  // does not model. Without this, the app learns it is out of budget only by
+  // spending a call — and a board read that dies halfway is worse than one that
+  // never starts.
+  const stub = createGeminiStub();
+  for (let i = 0; i < 5; i++) stub.enqueue({ text: "ok" });
+
+  const gemini = createGemini({
+    client: stub,
+    clock: createFakeClock(),
+    daily: { max: 3 },
+  });
+
+  for (let i = 0; i < 3; i++) await gemini.generate({ userId: "u1" });
+  assert.equal(stub.calls.length, 3, "the budget is spent, not withheld");
+
+  await assert.rejects(
+    () => gemini.generate({ userId: "u1" }),
+    (err) => err.quotaExhausted === true && err.budgetedLocally === true
+  );
+  assert.equal(stub.calls.length, 3, "the refused call never reached the model");
+});
+
+test("one user's spent daily budget does not block another user", async () => {
+  const stub = createGeminiStub();
+  for (let i = 0; i < 4; i++) stub.enqueue({ text: "ok" });
+  const gemini = createGemini({ client: stub, clock: createFakeClock(), daily: { max: 1 } });
+
+  await gemini.generate({ userId: "u1" });
+  await assert.rejects(() => gemini.generate({ userId: "u1" }));
+
+  const other = await gemini.generate({ userId: "u2" });
+  assert.equal(other.status, "ok", "a separate user has their own budget");
+});
+
+test("no daily budget configured means no daily limit is enforced", async () => {
+  // The check is opt-in: a paid key with no meaningful daily cap must be
+  // unaffected. Stay inside the per-minute throttle so this asserts the DAILY
+  // behaviour only — over that, calls are deferred (not refused), which is the
+  // burst-smoothing story and is tested elsewhere.
+  const stub = createGeminiStub();
+  for (let i = 0; i < 15; i++) stub.enqueue({ text: "ok" });
+  const gemini = createGemini({ client: stub, clock: createFakeClock() });
+
+  for (let i = 0; i < 15; i++) {
+    const r = await gemini.generate({ userId: "u1" });
+    assert.equal(r.status, "ok", "no call is refused when no daily budget is set");
+  }
+  assert.equal(stub.calls.length, 15);
+});

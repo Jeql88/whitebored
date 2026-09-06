@@ -33,6 +33,21 @@ const DEFAULT_BACKOFF = { baseMs: 1000, maxRetries: 5 };
 // burst-smoothing queue. Free-tier Gemini limits per minute; tune at the seam.
 const DEFAULT_PER_USER = { windowMs: 60 * 1000, max: 15 };
 
+// The free tier's binding constraint is a DAILY cap (~20 generate calls), not the
+// per-minute burst the throttle above smooths. Without tracking it the app only
+// learns it is out of budget by spending a call and getting a 429 — and a user
+// halfway through a board read then loses the rest of it. Counting locally lets the
+// last calls be refused up front, with an honest message, instead of failing
+// mid-pipeline. Set GEMINI_DAILY_BUDGET to match the key's real quota; 0 disables
+// the check for a paid key with no meaningful daily limit.
+const DEFAULT_DAILY = { max: 0 };
+
+function startOfNextDay(now) {
+  const d = new Date(now);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
 function isRateLimit(err) {
   return err && err.status === 429;
 }
@@ -44,13 +59,40 @@ function isQuotaExhausted(err) {
   return Boolean(err && err.quotaExhausted);
 }
 
-function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
+function createGemini({ client, clock = realClock, backoff, perUser, daily } = {}) {
   if (!client || typeof client.generate !== "function") {
     throw new Error("createGemini: a client with generate(request) is required");
   }
 
   const backoffCfg = { ...DEFAULT_BACKOFF, ...(backoff || {}) };
   const throttle = { ...DEFAULT_PER_USER, ...(perUser || {}) };
+  const dailyCfg = { ...DEFAULT_DAILY, ...(daily || {}) };
+
+  // Calls spent today, per user, and when that count resets. Purely local
+  // bookkeeping: it cannot know what the key spent elsewhere, so it is a guard
+  // against predictable waste, never a source of truth about the real quota.
+  const spentToday = new Map(); // userId -> { count, resetAt }
+
+  function dailyState(userId) {
+    let d = spentToday.get(userId);
+    const now = clock.now();
+    if (!d || d.resetAt <= now) {
+      d = { count: 0, resetAt: startOfNextDay(now) };
+      spentToday.set(userId, d);
+    }
+    return d;
+  }
+
+  // Would this call exceed the day's budget? Checked BEFORE spending it.
+  function overDailyBudget(userId) {
+    if (!dailyCfg.max) return false;
+    return dailyState(userId).count >= dailyCfg.max;
+  }
+
+  function recordDailySpend(userId) {
+    if (!dailyCfg.max) return;
+    dailyState(userId).count += 1;
+  }
 
   // Per-user state: a window bucket (count/resetAt, as in the rateLimit
   // middleware) plus a FIFO queue of deferred jobs waiting for budget. One entry
@@ -107,6 +149,7 @@ function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
 
   async function run(request) {
     const response = await callWithBackoff(request);
+    recordDailySpend(request && request.userId);
     return { status: "ok", response };
   }
 
@@ -171,6 +214,20 @@ function createGemini({ client, clock = realClock, backoff, perUser } = {}) {
 
   async function generate(request) {
     const userId = request && request.userId;
+
+    // Refuse up front once the day's budget is gone. Spending the call to be told
+    // 429 costs the same quota and fails deeper in the pipeline, where a partly
+    // read board is harder to recover than a clear "not today".
+    if (overDailyBudget(userId)) {
+      const err = new Error(
+        "The daily AI budget for this key is used up. It resets at midnight."
+      );
+      err.status = 429;
+      err.quotaExhausted = true;
+      err.budgetedLocally = true;
+      throw err;
+    }
+
     const s = userState(userId);
 
     // Under budget and nothing already queued ahead of us → run now.
@@ -218,7 +275,11 @@ function createGeminiFromConfig(config, opts = {}) {
     model: config.GEMINI_MODEL,
     embedModel: config.GEMINI_EMBED_MODEL,
   });
-  return createGemini({ client, ...opts });
+  // The daily budget is opt-in: unset, nothing changes. Set it to the key's real
+  // quota and the last calls of the day are refused with a clear message instead
+  // of failing mid-pipeline on a 429.
+  const dailyMax = Number(config.GEMINI_DAILY_BUDGET) || 0;
+  return createGemini({ client, daily: { max: dailyMax }, ...opts });
 }
 
 module.exports = { createGemini, createGeminiFromConfig };

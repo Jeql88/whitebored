@@ -54,6 +54,10 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 // Retrieval embeddings (D14). Read here so the deployed value actually reaches
 // the client seam; realClient falls back to its own default when this is empty.
 const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
+// Calls per user per day before the app refuses locally rather than spending one to
+// be told 429. Matches the free tier's real constraint, which is a DAILY cap, not
+// the per-minute burst the throttle smooths. Unset (0) disables the check.
+const GEMINI_DAILY_BUDGET = Number(process.env.GEMINI_DAILY_BUDGET) || 0;
 
 function requireVar(name, value) {
   if (!value) {
@@ -82,4 +86,5 @@ module.exports = {
   GEMINI_API_KEY,
   GEMINI_MODEL,
   GEMINI_EMBED_MODEL,
+  GEMINI_DAILY_BUDGET,
 };
