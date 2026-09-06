@@ -1,13 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import PropTypes from "prop-types";
-import { NotebookPen, Sparkles, FileText, ShieldCheck, Target, X } from "lucide-react";
+import { NotebookPen, Sparkles, FileText, X } from "lucide-react";
 
-import NotesPanel from "./NotesPanel";
+import NotesDocument from "./NotesDocument";
 import TranscriptionReview from "./TranscriptionReview";
 import ChatPanel from "./ChatPanel";
 import DocumentsPanel from "./DocumentsPanel";
-import FactCheckPanel from "./FactCheckPanel";
-import CoveragePanel from "./CoveragePanel";
 import ScopeBar from "./ScopeBar";
 
 // One sidebar for the whole Sketch-to-Notes surface. Before this, each panel was
@@ -23,12 +21,14 @@ import ScopeBar from "./ScopeBar";
 // Layout (D22): a docked right COLUMN on wide screens (the editor reflows the
 // canvas around it) and a full-height slide-over SHEET on narrow ones.
 
+// Three destinations, not five. Fact-check and coverage were their own tabs, but
+// neither is a place you go — a contradiction is a property of a specific note
+// line, and a gap is something missing from the notes as a whole. Both now render
+// inside the notes document itself, where the thing they describe actually is.
 const TABS = [
   { id: "notes", label: "Notes", Icon: NotebookPen },
   { id: "chat", label: "Chat", Icon: Sparkles },
   { id: "documents", label: "Documents", Icon: FileText },
-  { id: "factcheck", label: "Fact-check", Icon: ShieldCheck },
-  { id: "coverage", label: "Coverage", Icon: Target },
 ];
 
 export default function StudioSidebar({
@@ -42,8 +42,6 @@ export default function StudioSidebar({
   onReread,
   onCorrectTranscript,
   onConfirmTranscript,
-  noteType,
-  onNoteTypeChange,
   onGenerateNotes,
   onRegenerateNotes,
   notesLines,
@@ -63,15 +61,10 @@ export default function StudioSidebar({
   onDeleteDocument,
   uploadingDoc,
   flags,
+  coverageGaps,
   onAcceptFlag,
   onDismissFlag,
   onCitationClick,
-  pendingEdit,
-  onConfirmEdit,
-  onDeclineEdit,
-  coverageReport,
-  onRunFactCheck,
-  onRunCoverage,
   scope,
   scopeDiff,
   matchedTopics,
@@ -100,7 +93,8 @@ export default function StudioSidebar({
 
   // The scope bar drives study generation, so it belongs with the tabs that make
   // study material — not with the document reader or the fact-check list.
-  const showScope = activeTab === "notes" || activeTab === "coverage";
+  // Scope governs what a generate run covers, so it belongs with the notes.
+  const showScope = activeTab === "notes";
 
   const tabClass = (selected) =>
     [
@@ -220,15 +214,21 @@ export default function StudioSidebar({
               </div>
             )}
 
-            {(notesLines.length > 0 || notesBusy) && (
-              <NotesPanel
-                variant="embedded"
-                noteType={noteType}
-                onNoteTypeChange={onNoteTypeChange}
-                onGenerate={onGenerateNotes}
+            {notesBusy && notesLines.length === 0 && (
+              <p role="status" className="px-3 py-2 text-[11px] text-[var(--surface-muted)]">
+                Writing your notes…
+              </p>
+            )}
+
+            {notesLines.length > 0 && (
+              <NotesDocument
                 lines={notesLines}
-                generating={notesBusy}
+                flags={flags}
+                gaps={coverageGaps}
                 onHighlight={onHighlight}
+                onAcceptFlag={onAcceptFlag}
+                onDismissFlag={onDismissFlag}
+                onCitationClick={onCitationClick}
               />
             )}
 
@@ -265,43 +265,6 @@ export default function StudioSidebar({
             uploading={uploadingDoc}
           />
         )}
-        {activeTab === "factcheck" && (
-          <>
-            <div className="border-b border-[var(--surface-border)] p-3">
-              <button
-                type="button"
-                onClick={() => onRunFactCheck?.()}
-                className="w-full rounded bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
-              >
-                Check notes against sources
-              </button>
-            </div>
-            <FactCheckPanel
-            variant="embedded"
-            flags={flags}
-            onAccept={onAcceptFlag}
-            onDismiss={onDismissFlag}
-            onCitationClick={onCitationClick}
-            pendingEdit={pendingEdit}
-            onConfirmEdit={onConfirmEdit}
-            onDeclineEdit={onDeclineEdit}
-            />
-          </>
-        )}
-        {activeTab === "coverage" && (
-          <>
-            <div className="border-b border-[var(--surface-border)] p-3">
-              <button
-                type="button"
-                onClick={() => onRunCoverage?.()}
-                className="w-full rounded bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
-              >
-                Check coverage against a document
-              </button>
-            </div>
-            <CoveragePanel variant="embedded" report={coverageReport} onCitationClick={onCitationClick} />
-          </>
-        )}
       </div>
 
       {/* Scope is the contract for what a generate run covers, so it sits directly
@@ -331,8 +294,6 @@ StudioSidebar.propTypes = {
   onReread: PropTypes.func,
   onCorrectTranscript: PropTypes.func,
   onConfirmTranscript: PropTypes.func,
-  noteType: PropTypes.string,
-  onNoteTypeChange: PropTypes.func,
   onGenerateNotes: PropTypes.func,
   onRegenerateNotes: PropTypes.func,
   notesLines: PropTypes.array,
@@ -352,15 +313,10 @@ StudioSidebar.propTypes = {
   onDeleteDocument: PropTypes.func,
   uploadingDoc: PropTypes.bool,
   flags: PropTypes.array,
+  coverageGaps: PropTypes.array,
   onAcceptFlag: PropTypes.func,
   onDismissFlag: PropTypes.func,
   onCitationClick: PropTypes.func,
-  pendingEdit: PropTypes.object,
-  onConfirmEdit: PropTypes.func,
-  onDeclineEdit: PropTypes.func,
-  coverageReport: PropTypes.object,
-  onRunFactCheck: PropTypes.func,
-  onRunCoverage: PropTypes.func,
   scope: PropTypes.object,
   scopeDiff: PropTypes.object,
   matchedTopics: PropTypes.arrayOf(PropTypes.string),

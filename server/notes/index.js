@@ -52,17 +52,17 @@ const NOTE_KINDS = ["summary", "heading", "key-point", "sequence-step"];
 // the RESULT), but each framing must forbid inventing anything not on the board.
 const NOTE_TYPES = {
   lecture:
-    "Shape these into lecture notes: a short summary, then headings and key " +
-    "points under them.",
+    "Write these as lecture notes: open with a one-sentence summary, then group " +
+    "the material under headings with the supporting points beneath each.",
   meeting:
-    "Shape these into meeting notes: decisions and action items as key points " +
-    "under clear headings.",
+    "Write these as meeting notes: group under headings, and make decisions and " +
+    "action items unmistakable as their own points.",
   process:
-    "Shape these into an ordered process: sequence steps in the order the " +
-    "diagram's arrows and bindings imply, each step a sequence-step line.",
+    "Write these as an ordered process: number the steps in the order the " +
+    "diagram's arrows and bindings imply, one step per line.",
   freeform:
-    "Shape these into clean freeform notes: keep the user's structure, tidy the " +
-    "wording, add headings only where they clarify.",
+    "Write these as clean study notes: keep the author's own structure, tidy the " +
+    "wording, and add headings only where they genuinely clarify.",
 };
 
 const DEFAULT_NOTE_TYPE = "freeform";
@@ -74,7 +74,19 @@ const SCHEMA_FENCE =
   "that are not present in it. Return ONLY JSON: an array of note lines, each " +
   '{ "text": string, "kind": one of ' +
   `${JSON.stringify(NOTE_KINDS)}, "sourceElementIds": string[] }. ` +
-  "sourceElementIds must reference the element ids the line came from.";
+  "sourceElementIds must reference the element ids the line came from. " +
+  // Notes are read as a DOCUMENT, not a list of chips, so the model writes real
+  // prose structure. Inline markdown only: block syntax (# headings, - bullets)
+  // is not used because `kind` already carries the structural role and the
+  // renderer supplies the bullet and heading weight — emitting both would
+  // double them up.
+  "Write each line as finished prose, not a fragment: a heading is a short title " +
+  "in Title Case with no trailing punctuation; a key-point is a complete " +
+  "sentence. You may use inline markdown for emphasis — **bold** for terms that " +
+  "matter, *italics* sparingly, `code` for literal notation — but do NOT start a " +
+  "line with #, -, *, or a number: the structure comes from `kind`, not from " +
+  "typed-in symbols. Order the lines as they should be read, with each heading " +
+  "followed by the points that belong under it.";
 
 function promptFor(noteType) {
   return NOTE_TYPES[noteType] || NOTE_TYPES[DEFAULT_NOTE_TYPE];

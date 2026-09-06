@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "../../lib/auth-client";
 import { io } from "socket.io-client";
@@ -106,7 +106,10 @@ export default function WhiteboardEditor() {
   // reviewed; notes stream in line-by-line over the socket and are the artifact the
   // rest of the pipeline (cards, coverage, fact-check) reads.
   const [notesLines, setNotesLines] = useState([]);
-  const [noteType, setNoteType] = useState("lecture");
+  // The prompt framing notes are written with. The type picker was removed from
+  // the panel (one action, not a form to fill in first); lecture is the sensible
+  // default for turning a board into notes.
+  const [noteType] = useState("lecture");
   const [notesBusy, setNotesBusy] = useState(false);
   // The phase-1 artifact under review. Notes are gated behind confirming it
   // (D3): Phase 2 runs on corrected text, never on the raw read.
@@ -555,6 +558,18 @@ export default function WhiteboardEditor() {
       if (boardId !== whiteboardId) return;
       setNotesLines(record?.lines || []);
       setNotesBusy(false);
+
+      // Notes exist, so check them against any attached source and work out what
+      // the source covers that the board does not. Both used to be their own tab
+      // and their own button; neither is a place the user should have to go. Both
+      // return empty when no document is attached, so this is free in that case
+      // and never blocks the notes that just arrived.
+      runFactCheck(whiteboardId)
+        .then((r) => setFactCheckFlags(r?.flags || []))
+        .catch(() => {});
+      runCoverage(whiteboardId)
+        .then((r) => setCoverageReport(r?.report || null))
+        .catch(() => {});
     };
     const onErr = ({ boardId }) => {
       if (boardId !== whiteboardId) return;
@@ -999,6 +1014,13 @@ export default function WhiteboardEditor() {
     [whiteboardId, activeDoc, refreshDocuments]
   );
 
+  // The topics a source covers that the board does not (D16). Surfaced at the end
+  // of the notes, never auto-added.
+  const coverageGaps = useMemo(
+    () => (coverageReport?.topics || []).filter((t) => t.status === "gap"),
+    [coverageReport]
+  );
+
   // --- Fact-check, coverage, scope ------------------------------------------
 
   // Restore a stored transcription so a reload returns to where the user was —
@@ -1055,31 +1077,6 @@ export default function WhiteboardEditor() {
     },
     [whiteboardId]
   );
-
-  // Run the passes on demand. Both return empty rather than erroring when there is
-  // no document attached or no Gemini key, so the panels stay honest.
-  const runFactCheckNow = useCallback(async () => {
-    showToast("Checking your notes against your sources…");
-    try {
-      const r = await runFactCheck(whiteboardId);
-      setFactCheckFlags(r?.flags || []);
-      if (!r?.flags?.length) showToast("No contradictions found.");
-    } catch {
-      showToast("Couldn't run the fact-check.");
-    }
-  }, [whiteboardId]);
-
-  const runCoverageNow = useCallback(async () => {
-    showToast("Checking what your board covers…");
-    try {
-      const r = await runCoverage(whiteboardId);
-      setCoverageReport(r?.report || null);
-      if (!r?.report) showToast("Attach a document first — coverage compares your board against it.");
-    } catch {
-      showToast("Couldn't build the coverage report.");
-    }
-  }, [whiteboardId]);
-
 
   // Jump the Documents tab to a citation's page. Both fact-check flags and
   // coverage gaps cite {docId, page}, so one handler serves both.
@@ -1421,8 +1418,6 @@ export default function WhiteboardEditor() {
             onReread={rereadBoard}
             onCorrectTranscript={correctTranscript}
             onConfirmTranscript={confirmTranscript}
-            noteType={noteType}
-            onNoteTypeChange={setNoteType}
             onGenerateNotes={generateNotes}
             onRegenerateNotes={regenerateNotes}
             notesLines={notesLines}
@@ -1445,9 +1440,7 @@ export default function WhiteboardEditor() {
             onAcceptFlag={acceptFlag}
             onDismissFlag={dismissFlag}
             onCitationClick={jumpToCitation}
-            coverageReport={coverageReport}
-            onRunFactCheck={runFactCheckNow}
-            onRunCoverage={runCoverageNow}
+            coverageGaps={coverageGaps}
             scope={scope}
             scopeDiff={scopeDiff}
             onScopeChange={updateScope}

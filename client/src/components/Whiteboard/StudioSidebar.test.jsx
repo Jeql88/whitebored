@@ -36,14 +36,10 @@ describe("StudioSidebar", () => {
     renderSidebar();
 
     expect(screen.getByRole("complementary", { name: /study tools/i })).toBeInTheDocument();
+    // Three destinations. Fact-check and coverage are properties of the notes,
+    // not places to go, so they render inside the notes document instead.
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual([
-      "Notes",
-      "Chat",
-      "Documents",
-      "Fact-check",
-      "Coverage",
-    ]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["Notes", "Chat", "Documents"]);
   });
 
   it("shows only the active tab's panel, so the tools never fight for the same space", () => {
@@ -60,9 +56,9 @@ describe("StudioSidebar", () => {
     const onTabChange = vi.fn();
     renderSidebar({ onTabChange });
 
-    await userEvent.click(screen.getByRole("tab", { name: /coverage/i }));
+    await userEvent.click(screen.getByRole("tab", { name: /documents/i }));
 
-    expect(onTabChange).toHaveBeenCalledWith("coverage");
+    expect(onTabChange).toHaveBeenCalledWith("documents");
   });
 
   it("shows the scope bar on the tabs that generate study material", () => {
@@ -138,7 +134,7 @@ describe("StudioSidebar — notes in one action", () => {
 
     expect(screen.getByRole("region", { name: /transcription review/i })).toBeInTheDocument();
     // Notes are not written from text the user has not corrected.
-    expect(screen.queryByRole("complementary", { name: /^notes$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: /notes/i })).not.toBeInTheDocument();
   });
 
   it("does not interrupt when the read was clean — notes are what shows", () => {
@@ -150,7 +146,9 @@ describe("StudioSidebar — notes in one action", () => {
     });
 
     expect(screen.queryByRole("region", { name: /transcription review/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: /^notes$/i })).toBeInTheDocument();
+    // The notes render as a document, not a panel-with-a-header.
+    expect(screen.getByRole("article", { name: /notes/i })).toBeInTheDocument();
+    expect(screen.getByText(/Mitosis has four phases/)).toBeInTheDocument();
   });
 
   it("offers a re-read once notes exist, so a changed board can be picked up", async () => {

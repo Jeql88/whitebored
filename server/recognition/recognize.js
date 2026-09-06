@@ -136,7 +136,15 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
       try {
         byCropId = parseBatch(await textOf(await gemini.generate(buildRequest(userId, inkCrops))));
       } catch (err) {
-        console.error("[recognize] batch read failed, degrading to [unclear]:", err.message);
+        // Log the crop sizes with the failure: "Unable to process input image"
+        // means the model rejected one of these, and the dimensions are what
+        // distinguishes a too-small crop from a malformed one.
+        const sizes = inkCrops
+          .map((c) => `${c.cropId}=${Math.round((c.image || "").length / 1024)}KB`)
+          .join(" ");
+        console.error(
+          `[recognize] batch read failed, degrading to [unclear]: ${err.message} | crops: ${sizes}`
+        );
       }
       for (const crop of inkCrops) {
         readings.set(crop.cropId, {
