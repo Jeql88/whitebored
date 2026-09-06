@@ -39,7 +39,7 @@ export default function StudioSidebar({
   transcript,
   transcriptConfirmed,
   transcribing,
-  onTranscribe,
+  onReread,
   onCorrectTranscript,
   onConfirmTranscript,
   noteType,
@@ -171,23 +171,47 @@ export default function StudioSidebar({
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {activeTab === "notes" && (
-          <>
-            {/* Phase 1 (D3): read the board, then review what was read. Notes stay
-                gated behind confirming this — a misread is caught here rather than
-                propagating into the notes. */}
+          <div className="flex flex-col">
+            {/* One action, whole pipeline: reads the board and writes notes. The
+                review step below appears only when the AI was actually unsure, so
+                a clean board goes straight from this button to notes (D3 still
+                holds — notes are never written from text the user could not
+                correct; they just are not asked to when there is nothing to fix). */}
             <div className="border-b border-[var(--surface-border)] p-3">
               <button
                 type="button"
-                onClick={() => onTranscribe?.()}
-                disabled={transcribing}
-                className="w-full rounded bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                onClick={() => (notesLines.length > 0 ? onReread?.() : onGenerateNotes?.())}
+                disabled={transcribing || notesBusy}
+                className="w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
               >
-                {transcribing ? "Reading your board…" : transcript ? "Re-read the board" : "Read the board"}
+                {transcribing
+                  ? "Reading your board…"
+                  : notesBusy
+                    ? "Writing notes…"
+                    : notesLines.length > 0
+                      ? "Re-read board & update notes"
+                      : "Generate notes"}
               </button>
+
+              {notesLines.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onRegenerateNotes?.()}
+                  disabled={notesBusy}
+                  className="mt-2 w-full rounded-lg border border-[var(--surface-border)] px-3 py-1.5 text-[11px] font-medium text-[var(--surface-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--surface-text)] disabled:opacity-50"
+                >
+                  Rewrite notes (keeps your edits)
+                </button>
+              )}
             </div>
 
+            {/* Only shown when the read left gaps — otherwise it never interrupts. */}
             {transcript && !transcriptConfirmed && (
-              <div className="p-3">
+              <div className="border-b border-[var(--surface-border)] p-3">
+                <p className="mb-2 text-[11px] text-[var(--surface-muted)]">
+                  Some words could not be read. Fill them in and notes will be
+                  written from your corrections.
+                </p>
                 <TranscriptionReview
                   artifact={transcript}
                   onCorrect={onCorrectTranscript}
@@ -196,19 +220,7 @@ export default function StudioSidebar({
               </div>
             )}
 
-            {notesLines.length > 0 && (
-              <div className="border-b border-[var(--surface-border)] px-3 pb-3">
-                <button
-                  type="button"
-                  onClick={() => onRegenerateNotes?.()}
-                  className="w-full rounded border border-[var(--surface-border)] px-3 py-1.5 text-xs font-medium text-[var(--surface-text)] hover:bg-[var(--surface-hover)]"
-                >
-                  Regenerate (keeps your edits)
-                </button>
-              </div>
-            )}
-
-            {(transcriptConfirmed || notesLines.length > 0) && (
+            {(notesLines.length > 0 || notesBusy) && (
               <NotesPanel
                 variant="embedded"
                 noteType={noteType}
@@ -220,13 +232,15 @@ export default function StudioSidebar({
               />
             )}
 
-            {!transcript && !notesLines.length && (
-              <p className="p-3 text-xs text-[var(--surface-muted)]">
-                Read the board to see what was recognized. You can fix any misreads
-                before notes are written from it.
-              </p>
+            {!transcript && !notesLines.length && !notesBusy && (
+              <div className="p-4 text-center">
+                <p className="text-xs text-[var(--surface-muted)]">
+                  Turn what you have drawn into study notes. Anything the AI cannot
+                  read clearly is flagged for you to fix before notes are written.
+                </p>
+              </div>
             )}
-          </>
+          </div>
         )}
         {activeTab === "chat" && (
           <ChatPanel
@@ -314,7 +328,7 @@ StudioSidebar.propTypes = {
   transcript: PropTypes.object,
   transcriptConfirmed: PropTypes.bool,
   transcribing: PropTypes.bool,
-  onTranscribe: PropTypes.func,
+  onReread: PropTypes.func,
   onCorrectTranscript: PropTypes.func,
   onConfirmTranscript: PropTypes.func,
   noteType: PropTypes.string,

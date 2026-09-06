@@ -62,7 +62,6 @@ import { addToNotesPayload } from "../../utils/addToNotes";
 import { extractPdfPageTexts, hasTextLayer } from "../../utils/pdfText";
 import { buildBoardCrops } from "../../utils/boardCrops";
 import StudioSidebar from "./StudioSidebar";
-import { appendLine } from "../../utils/notesArtifact";
 import Minimap from "./Minimap";
 import UserMenu from "../UserMenu";
 import SharePanel from "./SharePanel";
@@ -546,7 +545,11 @@ export default function WhiteboardEditor() {
 
     const onLine = ({ boardId, line }) => {
       if (boardId !== whiteboardId) return;
-      setNotesLines((prev) => appendLine(prev, line));
+      // notesLines is a plain array of lines, not a notes artifact — appending
+      // directly. (appendLine() takes a whole { lines } artifact; passing an array
+      // to it spread `undefined` and threw "t.lines is not iterable".)
+      if (!line || typeof line.text !== "string" || !line.text.trim()) return;
+      setNotesLines((prev) => [...prev, line]);
     };
     const onDone = ({ boardId, record }) => {
       if (boardId !== whiteboardId) return;
@@ -569,62 +572,6 @@ export default function WhiteboardEditor() {
     };
   }, [whiteboardId]);
 
-  // Phase 1 (D3/D4): read the board into a STRUCTURED artifact — per-crop segments
-  // with explicit [unclear] gaps — which the user reviews and corrects before any
-  // notes exist. Grouping + rasterizing happen here because the browser is what
-  // renders Excalidraw; the model call happens server-side through recognize().
-  const transcribeNow = useCallback(async () => {
-    const api = apiRef.current;
-    if (!api) return;
-    const els = api.getSceneElements();
-    if (!els.length) return showToast("Nothing on the board to read yet.");
-
-    setTranscribing(true);
-    showToast("Reading your board…");
-    try {
-      const crops = await buildBoardCrops(els, api.getFiles());
-      if (!crops.length) {
-        setTranscribing(false);
-        return showToast("Nothing readable found on the board.");
-      }
-      const result = await transcribeBoard(whiteboardId, crops);
-      if (result?.error) {
-        setTranscribing(false);
-        return showToast(result.error);
-      }
-      setTranscript(result.artifact);
-      setTranscriptConfirmed(false);
-      showToast("Check what was read, then confirm to generate notes.");
-    } catch {
-      showToast("Couldn't read the board. Try again.");
-    } finally {
-      setTranscribing(false);
-    }
-  }, [whiteboardId]);
-
-  // Persist each correction as it happens, so a reload does not lose the user's
-  // fixes and Phase 2 always reads the corrected artifact.
-  const correctTranscript = useCallback(
-    (artifact) => {
-      setTranscript(artifact);
-      saveTranscription(whiteboardId, artifact).catch(() => {});
-    },
-    [whiteboardId]
-  );
-
-  // Confirming the gate is what unlocks notes (D3).
-  const confirmTranscript = useCallback(
-    (artifact) => {
-      setTranscript(artifact);
-      setTranscriptConfirmed(true);
-      saveTranscription(whiteboardId, artifact).catch(() => {});
-      generateNotesFrom(artifact);
-    },
-    // generateNotesFrom is defined below and stable; see its own deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [whiteboardId]
-  );
-
   // Phase 2 (D3): notes generate ONLY from a confirmed artifact. Taking it as an
   // argument means the confirm handler can pass the freshly corrected version
   // without waiting for a state round-trip.
@@ -639,13 +586,97 @@ export default function WhiteboardEditor() {
     [whiteboardId, noteType]
   );
 
-  // Regenerate from the already-confirmed artifact (the Notes panel's own button).
-  const generateNotes = useCallback(() => {
-    if (!transcript || !transcriptConfirmed) {
-      return showToast("Read the board and confirm the transcription first.");
+  // ONE action, whole pipeline (D3 preserved). Reading the board and writing notes
+  // used to be two deliberate steps with a mandatory review between them, so the
+  // shortest path to notes was four clicks. It is now a single "Generate notes":
+  // read → if the AI was sure of everything, go straight to notes; if it was NOT,
+  // stop and show the review so the user fixes the gaps first.
+  //
+  // That keeps D3's actual guarantee — notes are never written from text the user
+  // has not had the chance to correct — while only charging them the review step
+  // when there is genuinely something to correct.
+  const readBoard = useCallback(async () => {
+    const api = apiRef.current;
+    if (!api) return null;
+    const els = api.getSceneElements();
+    if (!els.length) {
+      showToast("Nothing on the board to read yet.");
+      return null;
     }
-    generateNotesFrom(transcript);
-  }, [transcript, transcriptConfirmed, generateNotesFrom]);
+
+    const crops = await buildBoardCrops(els, api.getFiles());
+    if (!crops.length) {
+      showToast("Nothing readable found on the board.");
+      return null;
+    }
+    const result = await transcribeBoard(whiteboardId, crops);
+    if (result?.error) {
+      showToast(result.reason || result.error);
+      return null;
+    }
+    return result.artifact;
+  }, [whiteboardId]);
+
+  const generateNotes = useCallback(async () => {
+    if (notesBusy || transcribing) return;
+    setTranscribing(true);
+    showToast("Reading your board…");
+    try {
+      const artifact = await readBoard();
+      if (!artifact) return;
+
+      setTranscript(artifact);
+
+      if (artifact.hasUnclear) {
+        // Some words could not be read. Stop here — writing notes from guesses is
+        // exactly what the review step exists to prevent.
+        setTranscriptConfirmed(false);
+        showToast("Some words were unclear — fill them in, then notes will generate.");
+        return;
+      }
+
+      // Clean read: skip straight to notes.
+      setTranscriptConfirmed(true);
+      generateNotesFrom(artifact);
+    } catch {
+      showToast("Couldn't read the board. Try again.");
+    } finally {
+      setTranscribing(false);
+    }
+    // generateNotesFrom is declared below; it only closes over stable values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readBoard, notesBusy, transcribing]);
+
+  // Re-read a board that has changed since the last read.
+  const rereadBoard = useCallback(async () => {
+    setTranscript(null);
+    setTranscriptConfirmed(false);
+    setNotesLines([]);
+    await generateNotes();
+  }, [generateNotes]);
+
+  // Persist each correction as it happens, so a reload does not lose the user's
+  // fixes and Phase 2 always reads the corrected artifact.
+  const correctTranscript = useCallback(
+    (artifact) => {
+      setTranscript(artifact);
+      saveTranscription(whiteboardId, artifact).catch(() => {});
+    },
+    [whiteboardId]
+  );
+
+  // Confirming the gaps continues straight into notes — the user asked for notes,
+  // the review was an interruption, so finishing it should not need a second click.
+  const confirmTranscript = useCallback(
+    (artifact) => {
+      setTranscript(artifact);
+      setTranscriptConfirmed(true);
+      saveTranscription(whiteboardId, artifact).catch(() => {});
+      generateNotesFrom(artifact);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [whiteboardId]
+  );
 
   // Regenerate over the EXISTING notes (D7): the server reconciles fresh output
   // against what is stored, so a line the user edited survives and a line whose
@@ -1387,7 +1418,7 @@ export default function WhiteboardEditor() {
             transcript={transcript}
             transcriptConfirmed={transcriptConfirmed}
             transcribing={transcribing}
-            onTranscribe={transcribeNow}
+            onReread={rereadBoard}
             onCorrectTranscript={correctTranscript}
             onConfirmTranscript={confirmTranscript}
             noteType={noteType}

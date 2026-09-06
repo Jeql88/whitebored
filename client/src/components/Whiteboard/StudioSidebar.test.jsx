@@ -94,9 +94,11 @@ describe("StudioSidebar", () => {
   });
 });
 
-// The Notes tab is the Phase-1 → Phase-2 flow (D3). The gate is the point: notes
-// must not be reachable until the user has seen and confirmed what was read.
-describe("StudioSidebar — transcription gate", () => {
+// The Notes tab is one action, not a pipeline the user has to drive (D3 intact).
+// The review step is an INTERRUPTION that appears only when the AI was unsure —
+// so a clean board goes from one click straight to notes, and a board with gaps
+// still cannot produce notes until the user fixes them.
+describe("StudioSidebar — notes in one action", () => {
   const artifact = (hasUnclear) => ({
     phase: "transcription",
     hasUnclear,
@@ -113,36 +115,60 @@ describe("StudioSidebar — transcription gate", () => {
     ],
   });
 
-  it("invites the user to read the board before anything has been transcribed", () => {
+  it("offers a single Generate notes action before anything exists", () => {
     renderSidebar({ activeTab: "notes" });
 
-    expect(screen.getByRole("button", { name: /read the board/i })).toBeInTheDocument();
-    // No review and no notes yet — nothing to correct or generate from.
+    expect(screen.getByRole("button", { name: /generate notes/i })).toBeInTheDocument();
+    // No separate "read the board" step to click first.
+    expect(screen.queryByRole("button", { name: /^read the board$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: /transcription review/i })).not.toBeInTheDocument();
   });
 
-  it("shows the review step once the board is read, before any notes exist", () => {
+  it("runs the whole pipeline from that one button", async () => {
+    const onGenerateNotes = vi.fn();
+    renderSidebar({ activeTab: "notes", onGenerateNotes });
+
+    await userEvent.click(screen.getByRole("button", { name: /generate notes/i }));
+
+    expect(onGenerateNotes).toHaveBeenCalled();
+  });
+
+  it("interrupts with the review ONLY when the read left gaps", () => {
     renderSidebar({ activeTab: "notes", transcript: artifact(true), transcriptConfirmed: false });
 
     expect(screen.getByRole("region", { name: /transcription review/i })).toBeInTheDocument();
-    // Notes are NOT reachable while the transcription is unconfirmed.
+    // Notes are not written from text the user has not corrected.
     expect(screen.queryByRole("complementary", { name: /^notes$/i })).not.toBeInTheDocument();
   });
 
-  it("shows the notes panel once the transcription is confirmed", () => {
-    renderSidebar({ activeTab: "notes", transcript: artifact(false), transcriptConfirmed: true });
+  it("does not interrupt when the read was clean — notes are what shows", () => {
+    renderSidebar({
+      activeTab: "notes",
+      transcript: artifact(false),
+      transcriptConfirmed: true,
+      notesLines: [{ text: "Mitosis has four phases", kind: "key-point", sourceElementIds: ["s1"], origin: "board" }],
+    });
 
-    expect(screen.getByRole("complementary", { name: /^notes$/i })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: /transcription review/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: /^notes$/i })).toBeInTheDocument();
   });
 
-  it("asks to re-read once a transcription exists, so a changed board can be re-read", async () => {
-    const onTranscribe = vi.fn();
-    renderSidebar({ activeTab: "notes", transcript: artifact(false), transcriptConfirmed: true, onTranscribe });
+  it("offers a re-read once notes exist, so a changed board can be picked up", async () => {
+    const onReread = vi.fn();
+    renderSidebar({
+      activeTab: "notes",
+      notesLines: [{ text: "a line", kind: "key-point", sourceElementIds: ["s1"], origin: "board" }],
+      onReread,
+    });
 
-    await userEvent.click(screen.getByRole("button", { name: /re-read the board/i }));
+    await userEvent.click(screen.getByRole("button", { name: /re-read board/i }));
 
-    expect(onTranscribe).toHaveBeenCalled();
+    expect(onReread).toHaveBeenCalled();
+  });
+
+  it("shows progress on the action itself rather than a separate spinner", () => {
+    renderSidebar({ activeTab: "notes", transcribing: true });
+    expect(screen.getByRole("button", { name: /reading your board/i })).toBeDisabled();
   });
 });
 
