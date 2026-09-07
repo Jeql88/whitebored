@@ -8,6 +8,7 @@ const { registerNotesHandlers } = require("../notes/socketNotes");
 const { createNotesFromGemini } = require("../notes");
 const { createNotesStore } = require("../notes/store");
 const { boardVersion } = require("../recognition/boardVersion");
+const { transcriptionText } = require("../notes/verify");
 const { createNotesRegenerator } = require("../notes/regenerate");
 const { createGeminiFromConfig } = require("../gemini");
 const { registerChatHandlers } = require("../aichat/socketChat");
@@ -75,6 +76,12 @@ function initSocket(io) {
           if (line && typeof line.text === "string") parts.push(line.text);
         }
       }
+      // The TRANSCRIPTION is the board as it was actually read, and it is present
+      // long before any notes exist. Omitting it meant chat reported an empty
+      // board while the words it needed were sitting in the same document — the
+      // only source with content was the one never consulted.
+      const fromRead = transcriptionText(notes?.transcription);
+      if (fromRead.trim()) parts.push(fromRead);
     } catch { /* no notes yet */ }
     try {
       const _id = toObjectId(boardId);
