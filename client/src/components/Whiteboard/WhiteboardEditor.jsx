@@ -704,7 +704,22 @@ export default function WhiteboardEditor() {
         (n, e) => n + (e.segments || []).length,
         0
       );
-      if (words === 0) {
+      // Counting segments is not the same as counting READABLE text: a crop can
+      // come back with a segment whose text is empty, which reads as "something
+      // was found" while contributing nothing to the notes. Count actual words.
+      const readable = (artifact.entries || []).reduce(
+        (n, e) =>
+          n + (e.segments || []).filter((seg) => String(seg?.text || "").trim()).length,
+        0
+      );
+      console.info(
+        "[whitebored] generate: segments",
+        words,
+        "| non-empty",
+        readable
+      );
+
+      if (readable === 0) {
         // Two different failures land here and they need different advice. If the
         // server reported a readFailure, the read itself broke — telling the user
         // to write larger blames their handwriting for our bug and sends them off

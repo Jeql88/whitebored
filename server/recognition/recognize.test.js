@@ -439,3 +439,26 @@ test("a fully reused board is not mistaken for an empty read", async () => {
   });
   assert.equal(out.readFailure, null, "a fully cached read is not a failure");
 });
+
+test("an empty typed-text element contributes no segment, not a blank one", async () => {
+  // A real board carried a text element with text "". It came back as
+  // segments:[{text:""}], which counts as "something was read" to any caller
+  // tallying segments while contributing nothing — so a board of these reported a
+  // successful read and then produced no notes.
+  const stub = createGeminiStub();
+  const recognizer = createRecognizer({ gemini: createGemini({ client: stub }), userId: "u1" });
+
+  const out = await recognizer.recognize([
+    { cropId: "t1", kind: "text", text: "", sourceElementIds: ["a"], bbox: {} },
+    { cropId: "t2", kind: "text", text: "   ", sourceElementIds: ["b"], bbox: {} },
+    { cropId: "t3", kind: "text", text: "Hive Leader", sourceElementIds: ["c"], bbox: {} },
+  ]);
+
+  assert.deepEqual(out[0].segments, [], "empty text yields no segment");
+  assert.deepEqual(out[1].segments, [], "whitespace-only text yields no segment");
+  assert.equal(out[2].segments[0].text, "Hive Leader");
+  // The crops themselves are still reported — their shapes are never lost.
+  assert.equal(out.length, 3);
+  // No model call was needed: typed text never goes to the model.
+  assert.equal(stub.calls.length, 0);
+});

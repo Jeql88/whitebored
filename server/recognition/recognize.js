@@ -287,9 +287,13 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
     let readFailure = null;
     const readings = new Map();
     for (const crop of textCrops) {
+      // An empty typed-text element contributes no text. Emitting { text: "" }
+      // made the crop LOOK read — callers counting segments saw content that was
+      // not there, and the notes prompt received blank entries.
+      const typed = String(crop.text ?? "").trim();
       readings.set(crop.cropId, {
         cropId: crop.cropId,
-        segments: [{ text: String(crop.text ?? ""), uncertain: false }],
+        segments: typed ? [{ text: typed, uncertain: false }] : [],
         sourceElementIds: crop.sourceElementIds,
         bbox: crop.bbox,
       });
