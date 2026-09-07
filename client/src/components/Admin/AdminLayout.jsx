@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import { BarChart2, Users, Layout, Radio, ArrowLeft, ShieldCheck, Menu, X } from "lucide-react";
-import { apiFetch } from "../../api/config";
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import ThemeToggle from "../ThemeToggle";
 
 const navItems = [
@@ -11,19 +11,14 @@ const navItems = [
   { to: "/admin/live", label: "Live", icon: Radio },
 ];
 
-// Guard: checks /api/admin/me and redirects if not admin.
+// Guard: redirects if not admin. Reuses the shared check rather than making its
+// own request — two independent probes meant a second 403 for a normal user who
+// wandered to an admin URL, and two answers that could disagree.
 export function AdminRoute({ children }) {
-  const navigate = useNavigate();
-  const [status, setStatus] = useState("checking"); // checking | ok | denied
+  const { isAdmin, checked } = useIsAdmin();
 
-  useEffect(() => {
-    apiFetch("/api/admin/me")
-      .then((res) => setStatus(res.ok ? "ok" : "denied"))
-      .catch(() => setStatus("denied"));
-  }, []);
-
-  if (status === "checking") return null;
-  if (status === "denied") return <Navigate to="/whiteboards" />;
+  if (!checked) return null;
+  if (!isAdmin) return <Navigate to="/whiteboards" />;
   return children;
 }
 
@@ -58,7 +53,10 @@ export default function AdminLayout() {
           </button>
         </div>
         <nav className="flex-1 space-y-1 p-3">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {navItems.map((item) => {
+            const { to, label } = item;
+            const NavIcon = item.icon;
+            return (
             <NavLink
               key={to}
               to={to}
@@ -71,10 +69,11 @@ export default function AdminLayout() {
                 }`
               }
             >
-              <Icon size={16} />
+              <NavIcon size={16} />
               {label}
             </NavLink>
-          ))}
+            );
+          })}
         </nav>
         <div className="border-t border-[var(--surface-border)] p-3">
           <button
