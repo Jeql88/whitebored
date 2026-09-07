@@ -253,3 +253,102 @@ test("an empty or missing question is ignored (no model call)", async () => {
   assert.equal(stub.calls.length, 0);
   assert.ok(!socket.emitted.some((e) => e.event === "aiChatReply"));
 });
+
+// --- chat as the single surface: ask, or ask for something to be made --------
+
+function chatSocket(user = { userId: "u1" }) {
+  const handlers = new Map();
+  const emitted = [];
+  return {
+    user,
+    emitted,
+    on: (e, fn) => handlers.set(e, fn),
+    emit: (event, payload) => emitted.push({ event, payload }),
+    fire: async (e, p) => {
+      const fn = handlers.get(e);
+      if (fn) await fn(p);
+    },
+  };
+}
+
+const stubResponder = {
+  answer: async () => ({ role: "assistant", text: "an answer", source: { bucket: "general" } }),
+};
+
+test("asking for notes makes notes instead of describing them", async () => {
+  let called = null;
+  const socket = chatSocket();
+  registerChatHandlers(socket, {
+    responder: stubResponder,
+    makeNotes: async (boardId, opts) => {
+      called = { boardId, opts };
+      return { lines: [{ text: "a note" }, { text: "another" }] };
+    },
+  });
+
+  await socket.fire("aiChatMessage", { boardId: "b1", text: "generate notes from my board" });
+
+  assert.ok(called, "the notes maker was used");
+  const reply = socket.emitted.find((e) => e.event === "aiChatReply");
+  assert.match(reply.payload.message.text, /2 notes/);
+  assert.equal(reply.payload.message.artifact.kind, "notes");
+});
+
+test("asking for flashcards makes cards", async () => {
+  const socket = chatSocket();
+  registerChatHandlers(socket, {
+    responder: stubResponder,
+    makeCards: async () => ({ cards: [{ id: "c1" }, { id: "c2" }, { id: "c3" }] }),
+  });
+
+  await socket.fire("aiChatMessage", { boardId: "b1", text: "make flashcards" });
+
+  const reply = socket.emitted.find((e) => e.event === "aiChatReply");
+  assert.match(reply.payload.message.text, /3 flashcards/);
+  assert.equal(reply.payload.message.artifact.kind, "cards");
+});
+
+test("an ordinary question is answered, and makes nothing", async () => {
+  let made = false;
+  const socket = chatSocket();
+  registerChatHandlers(socket, {
+    responder: stubResponder,
+    makeNotes: async () => { made = true; return { lines: [] }; },
+  });
+
+  await socket.fire("aiChatMessage", { boardId: "b1", text: "what is on my board?" });
+
+  assert.equal(made, false, "a question must not rewrite the user's notes");
+  const reply = socket.emitted.find((e) => e.event === "aiChatReply");
+  assert.equal(reply.payload.message.text, "an answer");
+});
+
+test("a changed board is announced before the wait, an unchanged one is not", async () => {
+  const socket = chatSocket();
+  registerChatHandlers(socket, {
+    responder: stubResponder,
+    needsRead: async () => true,
+  });
+  await socket.fire("aiChatMessage", { boardId: "b1", text: "what is here?" });
+  const status = socket.emitted.find((e) => e.event === "aiChatStatus");
+  assert.equal(status?.payload.status, "reading");
+
+  const quiet = chatSocket();
+  registerChatHandlers(quiet, { responder: stubResponder, needsRead: async () => false });
+  await quiet.fire("aiChatMessage", { boardId: "b1", text: "what is here?" });
+  assert.ok(
+    !quiet.emitted.some((e) => e.event === "aiChatStatus" && e.payload.status === "reading"),
+    "an unchanged board must not claim to be re-reading"
+  );
+});
+
+test("without a maker wired, a make request still answers rather than failing", async () => {
+  // Degrade to the thing chat can always do, instead of erroring.
+  const socket = chatSocket();
+  registerChatHandlers(socket, { responder: stubResponder });
+
+  await socket.fire("aiChatMessage", { boardId: "b1", text: "generate notes" });
+
+  const reply = socket.emitted.find((e) => e.event === "aiChatReply");
+  assert.equal(reply.payload.message.text, "an answer");
+});

@@ -535,15 +535,29 @@ export default function WhiteboardEditor() {
     };
   }, [socket, whiteboardId]);
 
+  // Chat is the single surface for everything: ask a question, or ask for notes or
+  // flashcards. The server classifies the intent, and the board is re-read ONLY
+  // when its content actually changed since the last read — so an ordinary
+  // question costs one cheap call, and a request that needs fresh ink pays for a
+  // read exactly once. This replaces three separate buttons, two of which
+  // depended on the vision pipeline whether or not anything had changed.
   const sendAiChat = useCallback(
     (text) => {
       const s = socketRef.current;
       if (!s || !text?.trim()) return;
       setAiChat((prev) => [...prev, { role: "user", text }]);
       setAiPending(true);
-      s.emit("aiChatMessage", { boardId: whiteboardId, text });
+      const api = apiRef.current;
+      s.emit("aiChatMessage", {
+        boardId: whiteboardId,
+        text,
+        model: aiModel || undefined,
+        // The geometry only — no images. The server compares it against the board
+        // it last read and asks for a re-read if, and only if, it differs.
+        elements: api ? api.getSceneElements().filter((el) => !el.isDeleted) : [],
+      });
     },
-    [whiteboardId]
+    [whiteboardId, aiModel]
   );
 
   // Notes stream in line-by-line (D9): each line has already passed the server's

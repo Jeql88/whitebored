@@ -191,12 +191,12 @@ export function saveScope(id, scope) {
 
 // Read the board: the client groups + rasterizes crops, the server runs them
 // through recognize() and returns the structured artifact the review UI corrects.
-export function transcribeBoard(id, crops, { model } = {}) {
+export function transcribeBoard(id, crops, { model, elements } = {}) {
   // Reading a busy board is several batched model calls over many images; the
   // default 60s aborts it while it is still working.
   return apiFetch(`${WB}/${id}/transcription`, {
     method: "POST",
-    body: { crops, model },
+    body: { crops, model, elements },
     timeoutMs: 240000,
   });
 }
@@ -215,4 +215,14 @@ export function saveTranscription(id, artifact) {
 export async function getAiModels() {
   const data = await apiFetch(`${WB}/ai/models`);
   return Array.isArray(data?.models) ? data.models : [];
+}
+
+// Does this board need re-reading before the AI can answer about it? Sends the
+// element geometry only (no images), so the answer costs a small request rather
+// than rasterizing and uploading every crop to find out nothing changed.
+export function boardReadStatus(id, elements) {
+  return apiFetch(`${WB}/${id}/transcription/status`, {
+    method: "POST",
+    body: { elements },
+  });
 }

@@ -252,6 +252,33 @@ export default function StudioSidebar({
           </div>
         )}
         {activeTab === "chat" && (
+          <>
+            {/* The same picker as the notes tab: chat is now where notes and
+                flashcards are requested too, so the model choice belongs here as
+                much as there. One stored preference drives both. */}
+            {aiModels.length > 0 && (
+              <div className="border-b border-[var(--surface-border)] p-3">
+                <label className="block">
+                  <span className="sr-only">AI model</span>
+                  <select
+                    aria-label="AI model for chat"
+                    value={aiModel}
+                    onChange={(e) => onAiModelChange?.(e.target.value)}
+                    disabled={chatPending}
+                    className="w-full rounded-lg border border-[var(--surface-border)] bg-[var(--surface-bg)] px-2 py-1 text-[11px] text-[var(--surface-text)] disabled:opacity-50"
+                  >
+                    <option value="">Auto — fastest available</option>
+                    {aiModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                        {m.note ? ` — ${m.note}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
           <ChatPanel
             variant="embedded"
             messages={messages}
@@ -259,6 +286,7 @@ export default function StudioSidebar({
             onSend={onSendChat}
             onAddToNotes={onAddToNotes}
           />
+          </>
         )}
         {activeTab === "documents" && (
           <DocumentsPanel

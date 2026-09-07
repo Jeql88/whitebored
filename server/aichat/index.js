@@ -87,7 +87,7 @@ function parseReply(text) {
   return out;
 }
 
-function buildRequest({ userId, question, boardText, hits }) {
+function buildRequest({ userId, question, boardText, hits, model }) {
   const boardBlock = boardText && boardText.trim() ? boardText.trim() : "(empty)";
   const docBlock =
     hits.length > 0
@@ -108,6 +108,10 @@ function buildRequest({ userId, question, boardText, hits }) {
         ],
       },
     ],
+    // Answering is a text job: the fallback order leads with a stronger model,
+    // and `model` honours an explicit choice by the user.
+    job: "write",
+    model,
     config: { responseMimeType: "application/json" },
   };
 }
@@ -136,7 +140,7 @@ function createChatResponder({ gemini, retrieve, documents } = {}) {
     return map;
   }
 
-  async function answer({ question, boardText = "", scope = {}, userId } = {}) {
+  async function answer({ question, boardText = "", scope = {}, userId, model } = {}) {
     const q = typeof question === "string" ? question.trim() : "";
     if (!q) {
       throw new Error("createChatResponder.answer: a question is required");
@@ -148,7 +152,7 @@ function createChatResponder({ gemini, retrieve, documents } = {}) {
     const hits = await retrieve(q, { ...scope, k }).catch(() => []);
 
     const result = await gemini.generate(
-      buildRequest({ userId, question: q, boardText, hits })
+      buildRequest({ userId, question: q, boardText, hits, model })
     );
     const reply = parseReply(await textOf(result));
 

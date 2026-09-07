@@ -28,6 +28,7 @@ const { canAccessBoard } = require("../auth/boards");
 const { createTranscriber } = require("../transcription");
 const { createGeminiFromConfig } = require("../gemini");
 const { MODELS, BY_ID } = require("../gemini/models");
+const { boardVersion } = require("../recognition/boardVersion");
 const config = require("../config");
 
 // Transcription is a multi-image model call; keep it modest per user.
@@ -90,6 +91,22 @@ module.exports = function transcriptionRoutes() {
     res.json({ models: MODELS.map(({ id, label, note }) => ({ id, label, note })) });
   });
 
+  // Does this board need re-reading? Per-crop fingerprints already stop unchanged
+  // ink reaching the model, but the client still rasterizes and uploads every crop
+  // to discover that. Answering here first is what makes an automated "read only
+  // if it changed" flow affordable on a tier metered in calls per day.
+  router.post("/:id/transcription/status", authMiddleware, async (req, res) => {
+    if (!(await ensureAccess(req, res))) return;
+
+    const stored = await loadArtifact(req.params.id);
+    const version = boardVersion(req.body?.elements || []);
+    res.json({
+      needsRead: !stored?.boardVersion || stored.boardVersion !== version,
+      version,
+      hasTranscription: Boolean(stored?.entries?.length),
+    });
+  });
+
   router.get("/:id/transcription", authMiddleware, async (req, res) => {
     if (!(await ensureAccess(req, res))) return;
     res.json({ artifact: await loadArtifact(req.params.id) });
@@ -142,6 +159,12 @@ module.exports = function transcriptionRoutes() {
       // The caller may prefer a model (they ran out of quota on another, say).
       // An unknown id is ignored rather than trusted — it would fail every crop.
       const preferred = BY_ID.has(req.body?.model) ? req.body.model : undefined;
+      // Stamp the artifact with the board it was read FROM, so the status check
+      // above can tell later whether a re-read is needed. Derived from the
+      // elements the client sends alongside its crops.
+      const version = Array.isArray(req.body?.elements)
+        ? boardVersion(req.body.elements)
+        : null;
       const artifact = await transcriber.transcribe(crops, {
         userId: req.user.userId,
         previous,
@@ -152,7 +175,13 @@ module.exports = function transcriptionRoutes() {
       // board (which costs another model call).
       await notesCollection().updateOne(
         { boardId: req.params.id },
-        { $set: { boardId: req.params.id, transcription: artifact, updatedAt: new Date() } },
+        {
+          $set: {
+            boardId: req.params.id,
+            transcription: version ? { ...artifact, boardVersion: version } : artifact,
+            updatedAt: new Date(),
+          },
+        },
         { upsert: true }
       );
       // Surface a read failure to the client: it is the difference between

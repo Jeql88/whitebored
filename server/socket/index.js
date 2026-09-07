@@ -7,6 +7,7 @@ const { registerPresenceHandlers, getChatHistory } = require("./presence");
 const { registerNotesHandlers } = require("../notes/socketNotes");
 const { createNotesFromGemini } = require("../notes");
 const { createNotesStore } = require("../notes/store");
+const { boardVersion } = require("../recognition/boardVersion");
 const { createNotesRegenerator } = require("../notes/regenerate");
 const { createGeminiFromConfig } = require("../gemini");
 const { registerChatHandlers } = require("../aichat/socketChat");
@@ -197,6 +198,34 @@ function initSocket(io) {
         responder: chatResponder,
         canAccess: canAccessBoard,
         boardText: boardTextFor,
+        // Whether the board differs from the one the last transcription was read
+        // from. Cheap: geometry only, no images, no model call.
+        needsRead: async (boardId, elements) => {
+          if (!Array.isArray(elements) || elements.length === 0) return false;
+          const doc = await getCollections().notes.findOne({ boardId });
+          const stored = doc?.transcription?.boardVersion;
+          return !stored || stored !== boardVersion(elements);
+        },
+        // Chat can write the notes itself, from whatever the last read produced.
+        // It deliberately does NOT re-run the vision pipeline here: the board text
+        // it already has is what chat answers from, and reusing it keeps a notes
+        // request to a single model call.
+        makeNotes: notesGenerator
+          ? async (boardId, { userId }) => {
+              const store = createNotesStore({ collection: getCollections().notes });
+              const doc = await getCollections().notes.findOne({ boardId });
+              const transcription = doc?.transcription;
+              if (!transcription?.entries?.length) return { lines: [] };
+              const record = await notesGenerator.generate({
+                transcription,
+                noteType: doc?.noteType || "freeform",
+                boardId,
+                userId,
+              });
+              await store.save(record).catch(() => {});
+              return record;
+            }
+          : undefined,
       });
     }
   });
