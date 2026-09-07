@@ -32,7 +32,12 @@ export const PADDING = 24;
 export function cropDimensions(w, h) {
   const longest = Math.max(w, h);
   const shortest = Math.max(1, Math.min(w, h));
-  const scale = Math.max(1, Math.min(MIN_SHORT_EDGE / shortest, TILE / longest));
+  // NOT clamped to a minimum of 1. Clamping meant an oversized crop could never
+  // SHRINK: a 3340x1601 crop from a real board went out at full size and cost 15
+  // billing tiles on its own — on a ~20-call-per-day tier, one crop spending the
+  // budget. Shrinking is exactly what an oversized crop needs; the short-edge
+  // floor below still guarantees the model will accept the result.
+  const scale = Math.min(MIN_SHORT_EDGE / shortest, TILE / longest);
 
   // Excalidraw centres the drawing in the dimensions it is given, so the extra
   // pixels are plain background: the ink keeps its aspect ratio, and the image

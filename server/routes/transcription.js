@@ -103,12 +103,35 @@ module.exports = function transcriptionRoutes() {
       return res.status(503).json({ error: "Transcription is not configured" });
     }
 
-    const crops = Array.isArray(req.body?.crops)
-      ? req.body.crops.map(sanitizeCrop).filter(Boolean)
-      : [];
-    // Nothing readable on the board is a real answer, not an error.
+    const sent = Array.isArray(req.body?.crops) ? req.body.crops : [];
+    const crops = sent.map(sanitizeCrop).filter(Boolean);
+
+    // A crop that fails validation is DROPPED, and dropping them all produced a
+    // 200 with an empty artifact — the read "succeeded" while reading nothing.
+    // Report the discrepancy instead of hiding it: the usual cause is an ink crop
+    // whose image never rasterized, which is a client-side failure the user
+    // cannot see and the server was silently absorbing.
+    if (sent.length > 0 && crops.length < sent.length) {
+      const dropped = sent.length - crops.length;
+      const why = sent
+        .filter((c) => !sanitizeCrop(c))
+        .slice(0, 3)
+        .map((c) => `${c?.cropId || "?"}:${c?.kind || "?"}${c?.kind === "ink" && !c?.image ? " (no image)" : ""}`);
+      console.warn(
+        `[transcription] dropped ${dropped}/${sent.length} malformed crops — e.g. ${why.join(", ")}`
+      );
+    }
+    // Nothing readable on the board is a real answer, not an error — but "you
+    // sent nothing" and "everything you sent was malformed" are different
+    // problems and must not present identically.
     if (crops.length === 0) {
-      return res.json({ artifact: { phase: "transcription", hasUnclear: false, entries: [] } });
+      return res.json({
+        artifact: { phase: "transcription", hasUnclear: false, entries: [] },
+        readFailure:
+          sent.length > 0
+            ? `All ${sent.length} crops were rejected as malformed — the board images did not rasterize.`
+            : null,
+      });
     }
 
     try {
