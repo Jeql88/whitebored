@@ -83,6 +83,18 @@ function registerNotesHandlers(socket, { generator, regenerator, store, canAcces
         });
       }
 
+      // A run that produced NO lines is not a success. It reached here silently
+      // before — the panel just stayed empty with no error and no explanation,
+      // which is indistinguishable from the button doing nothing. The usual cause
+      // is the grounding gate rejecting everything the model wrote.
+      if (!record?.lines?.length) {
+        console.error(
+          `[notes] generated 0 lines for ${boardId} — nothing survived grounding`
+        );
+        socket.emit("notesError", { boardId, error: "nothing_grounded" });
+        return;
+      }
+
       socket.emit("notesDone", { boardId, record });
     } catch (err) {
       // Generation itself failing is unexpected (the central module absorbs rate

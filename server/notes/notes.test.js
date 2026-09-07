@@ -676,3 +676,49 @@ test("a line that mixes one real term with invented content is rejected", () => 
     false
   );
 });
+
+test("a run that grounds nothing reports it instead of succeeding emptily", async () => {
+  // An empty record used to reach notesDone, so the panel stayed blank with no
+  // error — indistinguishable from the button doing nothing at all.
+  const socket = fakeSocket();
+  registerNotesHandlers(socket, {
+    generator: { generate: async () => ({ boardId: "b1", noteType: "freeform", lines: [] }) },
+    store: { load: async () => null, save: async (r) => r },
+  });
+
+  await socket.fire("generateNotes", { boardId: "b1", transcription: "some text" });
+
+  assert.ok(
+    !socket.emitted.some((e) => e.event === "notesDone"),
+    "an empty run must not report success"
+  );
+  const err = socket.emitted.find((e) => e.event === "notesError");
+  assert.equal(err?.payload.error, "nothing_grounded");
+});
+
+test("a line that describes the input is rejected, however well it verifies", () => {
+  // A sparse keyword board gives the model nothing to connect, so it narrates the
+  // input instead ("The provided list includes the terms X, Y"). That quotes the
+  // board's own words, so it sails through grounding — but it tells the reader
+  // nothing they did not already have, so it is rejected by SHAPE.
+  const src = transcriptionText({
+    entries: [{ segments: [{ text: "SWAT" }, { text: "CCTV" }] }],
+  });
+
+  assert.equal(
+    verifyLine({ text: "The provided list includes the terms SWAT and CCTV", sourceElementIds: ["a"] }, src),
+    false
+  );
+  // A real note over the same terms is kept. The grounding ratio still applies:
+  // with only two words on the board, a sentence adding several unseen words is
+  // largely invented and correctly fails.
+  assert.equal(
+    verifyLine({ text: "SWAT responds when CCTV detects a threat", sourceElementIds: ["a"] }, src),
+    false,
+    "a two-word board cannot support a sentence that adds four new terms"
+  );
+  assert.equal(
+    verifyLine({ text: "SWAT and CCTV", sourceElementIds: ["a"] }, src),
+    true
+  );
+});

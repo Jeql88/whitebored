@@ -147,6 +147,12 @@ app.get("/healthz/config", (req, res) => {
       embedModel: config.GEMINI_EMBED_MODEL,
     },
     visionKeyConfigured: Boolean(config.GOOGLE_VISION_KEY),
+    // Which commit is actually serving. "Is my fix deployed?" has cost several
+    // debugging rounds already; Render exposes the sha it built from.
+    build:
+      process.env.RENDER_GIT_COMMIT?.slice(0, 7) ||
+      process.env.GIT_COMMIT?.slice(0, 7) ||
+      "unknown",
     // Names of every GEMINI_* variable actually present in this process. If the
     // dashboard shows a row but this list omits it, the value was never saved —
     // which distinguishes a dashboard problem from an application one.

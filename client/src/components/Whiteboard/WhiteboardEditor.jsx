@@ -589,6 +589,8 @@ export default function WhiteboardEditor() {
           "The daily AI limit for this key has run out. Notes will work again tomorrow.",
         rate_limited: "The AI is rate-limited right now — wait a moment and try again.",
         unreadable_reply: "The AI's reply came back garbled. Try generating again.",
+        nothing_grounded:
+          "The AI read your board but couldn't write notes it could trace back to it. Try adding a little more written detail.",
         forbidden: "You don't have access to this board.",
         regeneration_unavailable: "Regenerating notes isn't available right now.",
       };

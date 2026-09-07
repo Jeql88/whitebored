@@ -118,7 +118,31 @@ function keyTerms(line) {
 // and falls well under the bar; a real line dressed in ordinary English clears it.
 const MIN_GROUNDED_RATIO = 0.6;
 
+// Lines that describe the INPUT rather than the subject. A board of disconnected
+// keywords gives the model nothing to connect, and it answers by narrating what it
+// was given ("The provided list includes the terms X, Y, Z"). That is not a note —
+// it tells the reader nothing they did not already have — and it passes grounding
+// easily because it quotes the board's own words back. Rejected by shape, since no
+// amount of prompting reliably stops it on a sparse board.
+const META_PHRASES = [
+  // "The provided list includes...", "The terms listed include..."
+  /\b(the|this|these|those)\s+(\w+\s+){0,2}(list|lists|notes?|board|transcription|text|terms?|items?|words?|entries)\b/i,
+  // ...paired with a verb that reports rather than states.
+  /\b(includes?|contains?|mentions?|shows?|lists?|consists? of|are listed|is a list)\b/i,
+];
+
+// A line is meta when it BOTH names the input and reports on it — either half
+// alone is fine ("the board" can appear in a real note; "includes" is ordinary
+// English), so requiring both avoids rejecting genuine content.
+function isMetaDescription(text) {
+  const t = String(text || "");
+  return META_PHRASES.every((re) => re.test(t));
+}
+
 function verifyLine(line, transcription) {
+  // A line about the input is never a note, however well it "verifies".
+  if (isMetaDescription(line?.text)) return false;
+
   const terms = keyTerms(line);
   if (terms.length === 0) return false;
   const haystack = new Set(
@@ -133,4 +157,4 @@ function verifyLine(line, transcription) {
   return grounded / terms.length >= MIN_GROUNDED_RATIO;
 }
 
-module.exports = { verifyLine, transcriptionText, keyTerms, tokenize };
+module.exports = { verifyLine, transcriptionText, keyTerms, tokenize, isMetaDescription };

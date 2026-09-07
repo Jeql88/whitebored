@@ -81,6 +81,17 @@ const SCHEMA_FENCE =
   // is not used because `kind` already carries the structural role and the
   // renderer supplies the bullet and heading weight — emitting both would
   // double them up.
+  // A mind-map board is mostly disconnected keywords, and asking for "notes" from
+  // those produced a single meta-line describing the input ("The provided list
+  // includes the terms..."). Say plainly that the source is a whiteboard and that
+  // grouping bare terms IS the useful output — a reader wants the terms organised,
+  // not a sentence about there being terms.
+  "The source is a hand-drawn whiteboard, so it is often bare keywords and short " +
+  "phrases rather than prose. Organise them: group related terms under headings " +
+  "and keep the terms themselves as points. NEVER describe the input itself — " +
+  "phrases like \"the provided list\", \"the notes mention\" or \"this board " +
+  "contains\" are not notes. If two terms are clearly related, say how in a short " +
+  "sentence; if they are not, simply list them under a heading that groups them. " +
   "Write each line as finished prose, not a fragment: a heading is a short title " +
   "in Title Case with no trailing punctuation; a key-point is a complete " +
   "sentence. You may use inline markdown for emphasis — **bold** for terms that " +
