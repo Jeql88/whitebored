@@ -38,6 +38,9 @@ export default function StudioSidebar({
   transcript,
   transcribing,
   onReread,
+  aiModels = [],
+  aiModel = "",
+  onAiModelChange,
   onGenerateNotes,
   onRegenerateNotes,
   notesLines,
@@ -183,6 +186,31 @@ export default function StudioSidebar({
                       : "Generate notes"}
               </button>
 
+              {/* Each model has its own free-tier allowance and its own congestion,
+                  so switching is the way out of both "used up for today" and a
+                  model that is temporarily slow. Left on Auto, the server starts
+                  with the fastest and falls through on 429/503 by itself. */}
+              {aiModels.length > 0 && (
+                <label className="mt-2 block">
+                  <span className="sr-only">AI model</span>
+                  <select
+                    aria-label="AI model"
+                    value={aiModel}
+                    onChange={(e) => onAiModelChange?.(e.target.value)}
+                    disabled={transcribing || notesBusy}
+                    className="w-full rounded-lg border border-[var(--surface-border)] bg-[var(--surface-bg)] px-2 py-1 text-[11px] text-[var(--surface-text)] disabled:opacity-50"
+                  >
+                    <option value="">Auto — fastest available</option>
+                    {aiModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                        {m.note ? ` — ${m.note}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
               {notesLines.length > 0 && (
                 <button
                   type="button"
@@ -272,6 +300,9 @@ StudioSidebar.propTypes = {
   transcript: PropTypes.object,
   transcribing: PropTypes.bool,
   onReread: PropTypes.func,
+  aiModels: PropTypes.array,
+  aiModel: PropTypes.string,
+  onAiModelChange: PropTypes.func,
   onGenerateNotes: PropTypes.func,
   onRegenerateNotes: PropTypes.func,
   notesLines: PropTypes.array,

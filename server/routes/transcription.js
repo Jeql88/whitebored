@@ -27,6 +27,7 @@ const { getCollections } = require("../db");
 const { canAccessBoard } = require("../auth/boards");
 const { createTranscriber } = require("../transcription");
 const { createGeminiFromConfig } = require("../gemini");
+const { MODELS, BY_ID } = require("../gemini/models");
 const config = require("../config");
 
 // Transcription is a multi-image model call; keep it modest per user.
@@ -84,6 +85,11 @@ module.exports = function transcriptionRoutes() {
     return doc?.transcription || null;
   }
 
+  // The models this deployment offers, for the picker. Ids only — no key material.
+  router.get("/ai/models", authMiddleware, (req, res) => {
+    res.json({ models: MODELS.map(({ id, label, note }) => ({ id, label, note })) });
+  });
+
   router.get("/:id/transcription", authMiddleware, async (req, res) => {
     if (!(await ensureAccess(req, res))) return;
     res.json({ artifact: await loadArtifact(req.params.id) });
@@ -110,9 +116,13 @@ module.exports = function transcriptionRoutes() {
       // Hand the seam what this board read last time so unchanged ink is reused
       // rather than re-sent to the model (the free tier allows ~20 calls a DAY).
       const previous = await loadArtifact(req.params.id).catch(() => null);
+      // The caller may prefer a model (they ran out of quota on another, say).
+      // An unknown id is ignored rather than trusted — it would fail every crop.
+      const preferred = BY_ID.has(req.body?.model) ? req.body.model : undefined;
       const artifact = await transcriber.transcribe(crops, {
         userId: req.user.userId,
         previous,
+        model: preferred,
       });
 
       // Persist so a reload returns to the review step rather than re-reading the

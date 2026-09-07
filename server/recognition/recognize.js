@@ -186,7 +186,7 @@ function inlineDataOf(dataUrl) {
   return { mimeType: "image/png", data: dataUrl || "" };
 }
 
-function buildRequest(userId, inkCrops) {
+function buildRequest(userId, inkCrops, model) {
   const parts = [{ text: SCHEMA_INSTRUCTION }];
   for (const crop of inkCrops) {
     parts.push({ text: `cropId: ${crop.cropId}` });
@@ -259,7 +259,7 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
     throw new Error("createRecognizer: a central Gemini module is required");
   }
 
-  async function recognize(crops = [], { userId = defaultUserId, previous = null } = {}) {
+  async function recognize(crops = [], { userId = defaultUserId, previous = null, model } = {}) {
     if (!Array.isArray(crops) || crops.length === 0) return [];
 
     const textCrops = crops.filter((c) => c.kind === "text");
@@ -326,7 +326,7 @@ function createRecognizer({ gemini, userId: defaultUserId } = {}) {
         const results = await Promise.all(
           chunks.map(async (chunk) => {
             try {
-              return parseBatch(await textOf(await gemini.generate(buildRequest(userId, chunk))));
+              return parseBatch(await textOf(await gemini.generate(buildRequest(userId, chunk, model))));
             } catch (err) {
               // One bad chunk must not lose the rest of the board.
               console.error("[recognize] chunk failed:", err.message);

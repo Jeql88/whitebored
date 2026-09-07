@@ -51,6 +51,7 @@ import {
   getScope,
   saveScope,
   transcribeBoard,
+  getAiModels,
   getTranscription,
 } from "../../api/whiteboard";
 import { useTheme } from "../../theme/ThemeContext";
@@ -121,6 +122,14 @@ export default function WhiteboardEditor() {
 
   // Which tool the single sidebar is showing, and the state each one reads.
   const [studioTab, setStudioTab] = useState("notes");
+  const [aiModels, setAiModels] = useState([]);
+  const [aiModel, setAiModel] = useState(() => {
+    try {
+      return localStorage.getItem("whitebored:aiModel") || "";
+    } catch {
+      return "";
+    }
+  });
   const [factCheckFlags, setFactCheckFlags] = useState([]);
   const [coverageReport, setCoverageReport] = useState(null);
   const [scope, setScope] = useState({
@@ -652,7 +661,7 @@ export default function WhiteboardEditor() {
       showToast("Nothing readable found on the board.");
       return null;
     }
-    const result = await transcribeBoard(whiteboardId, crops);
+    const result = await transcribeBoard(whiteboardId, crops, { model: aiModel });
     if (result?.error) {
       showToast(result.reason || result.error);
       return null;
@@ -664,7 +673,7 @@ export default function WhiteboardEditor() {
       showToast(readFailureMessage(result.readFailure));
     }
     return result.artifact;
-  }, [whiteboardId]);
+  }, [whiteboardId, aiModel]);
 
   const generateNotes = useCallback(async () => {
     if (notesBusy || transcribing) return;
@@ -1049,6 +1058,24 @@ export default function WhiteboardEditor() {
     () => (coverageReport?.topics || []).filter((t) => t.status === "gap"),
     [coverageReport]
   );
+
+  // Offer whatever models this deployment supports. Loaded from the server so the
+  // picker cannot list something the backend would reject.
+  useEffect(() => {
+    if (isGuest) return;
+    getAiModels()
+      .then(setAiModels)
+      .catch(() => {});
+  }, [isGuest]);
+
+  const chooseAiModel = useCallback((id) => {
+    setAiModel(id);
+    try {
+      localStorage.setItem("whitebored:aiModel", id);
+    } catch {
+      // A browser blocking storage is not a reason to refuse the change.
+    }
+  }, []);
 
   // --- Fact-check, coverage, scope ------------------------------------------
 
@@ -1443,6 +1470,9 @@ export default function WhiteboardEditor() {
             transcript={transcript}
             transcribing={transcribing}
             onReread={rereadBoard}
+            aiModels={aiModels}
+            aiModel={aiModel}
+            onAiModelChange={chooseAiModel}
             onGenerateNotes={generateNotes}
             onRegenerateNotes={regenerateNotes}
             notesLines={notesLines}

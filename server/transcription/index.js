@@ -51,7 +51,7 @@ function createTranscriber({ recognizer, gemini, userId: defaultUserId } = {}) {
     );
   }
 
-  async function transcribe(crops = [], { userId = defaultUserId, previous = null } = {}) {
+  async function transcribe(crops = [], { userId = defaultUserId, previous = null, model } = {}) {
     // Delegate the read to the recognize seam. It returns, in crop order, one
     // reading per crop already in the structured-segment shape, with omitted or
     // illegible crops degraded to [unclear] gaps (never dropped) — the invariant
@@ -59,7 +59,7 @@ function createTranscriber({ recognizer, gemini, userId: defaultUserId } = {}) {
     // `previous` is the board's last stored artifact. Passing it lets the seam reuse
     // readings for ink that has not changed, so an edit-and-regenerate costs a model
     // call only for what actually changed.
-    const readings = await reader.recognize(crops, { userId, previous });
+    const readings = await reader.recognize(crops, { userId, previous, model });
 
     // The fingerprint rides on the entry so the NEXT read can tell which crops are
     // unchanged. It is derived data about the ink, not part of the reading itself.

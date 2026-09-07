@@ -1,5 +1,7 @@
 "use strict";
 
+const { orderFor, isCapacityError } = require("./models");
+
 // Central Gemini module — the single choke point every AI feature calls through.
 //
 // It owns the deterministic plumbing around the model call so no feature has to
@@ -147,10 +149,32 @@ function createGemini({ client, clock = realClock, backoff, perUser, daily } = {
     }
   }
 
+  // Try the request across models until one answers. A 429 or 503 means THAT model
+  // is out of quota or congested — a different model answers the same request fine,
+  // and each has its own free-tier allowance. Anything else (a 400 for a bad image,
+  // say) would fail identically everywhere, so it propagates immediately rather
+  // than burning four more models to learn the same thing.
   async function run(request) {
-    const response = await callWithBackoff(request);
-    recordDailySpend(request && request.userId);
-    return { status: "ok", response };
+    const order = orderFor(request?.job, request?.model);
+    let lastErr = null;
+
+    for (const model of order) {
+      try {
+        const response = await callWithBackoff({ ...request, model });
+        recordDailySpend(request && request.userId);
+        // Report which model actually answered: with fallback in play the caller
+        // can no longer assume it was the one it asked for.
+        return { status: "ok", response, model };
+      } catch (err) {
+        if (!isCapacityError(err)) throw err;
+        lastErr = err;
+        console.warn(`[gemini] ${model} unavailable (${err.status || "?"}), trying next`);
+      }
+    }
+
+    // Every model was rated-limited or congested. Surface the last real error so
+    // the caller can tell "out of quota" from "the request was wrong".
+    throw lastErr || new Error("No Gemini model was available");
   }
 
   // Embeddings share the client seam and the same 429 backoff, but are a distinct

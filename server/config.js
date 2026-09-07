@@ -50,7 +50,7 @@ function readSecretFile() {
 
 const GEMINI_API_KEY =
   process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_KEY || readSecretFile();
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 // Retrieval embeddings (D14). Read here so the deployed value actually reaches
 // the client seam; realClient falls back to its own default when this is empty.
 const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";

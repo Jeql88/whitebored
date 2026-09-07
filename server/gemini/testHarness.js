@@ -28,12 +28,14 @@ class GeminiRateLimitError extends Error {
 //   stub.enqueue(response)            queue a canned success response
 //   stub.enqueueError(error)          queue a thrown error (e.g. a 429)
 //   stub.enqueueRateLimit({ retryAfterMs })  shorthand for a queued 429
+//   stub.alwaysRateLimit()            every call 429s, however many are made
 //   stub.calls                        every request the module handed the client
 //
 // Responses are consumed FIFO. Running dry is a loud failure — a test that makes
 // more calls than it primed is a bug in the test, not a silent empty response.
 function createGeminiStub() {
   const script = []; // { kind: "ok"|"error", value }
+  let alwaysError = null; // when set, every call throws this regardless of script
   const calls = [];
   const embedCalls = [];
 
@@ -56,10 +58,19 @@ function createGeminiStub() {
       return this;
     },
 
+    // Every call rate-limits, however many are made. Needed since a 429 now falls
+    // through to the next model: a test for "the whole request gives up" cannot
+    // know how many attempts that takes without hard-coding the model list.
+    alwaysRateLimit({ retryAfterMs } = {}) {
+      alwaysError = new GeminiRateLimitError({ retryAfterMs });
+      return this;
+    },
+
     // The seam method the module calls. Signature mirrors the real client:
     // (request) -> Promise<response>, rejecting on model/transport errors.
     async generate(request) {
       calls.push(request);
+      if (alwaysError) throw alwaysError;
       const step = script.shift();
       if (!step) {
         throw new Error(

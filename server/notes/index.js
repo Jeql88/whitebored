@@ -139,6 +139,9 @@ function buildRequest(userId, transcription, noteType) {
   const instruction = `${promptFor(noteType)}\n\n${SCHEMA_FENCE}`;
   return {
     userId,
+    // Writing notes is one call over text where quality is visible, so it leads
+    // with a stronger model (the read path leads with the fastest).
+    job: "write",
     contents: [
       {
         role: "user",

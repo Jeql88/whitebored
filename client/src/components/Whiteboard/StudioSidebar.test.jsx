@@ -192,3 +192,43 @@ describe("StudioSidebar — embedded panel chrome", () => {
     expect(screen.getByRole("complementary", { name: /documents/i })).toBeInTheDocument();
   });
 });
+
+// Each model has its own free-tier allowance, so switching is how a user keeps
+// working after exhausting one — and how they escape a congested model.
+describe("StudioSidebar — model picker", () => {
+  const models = [
+    { id: "gemini-3.5-flash-lite", label: "Flash Lite 3.5", note: "Fastest." },
+    { id: "gemini-3.8-flash", label: "Flash 3.8", note: "Best for notes." },
+  ];
+
+  it("offers the models the server reports, defaulting to automatic", () => {
+    renderSidebar({ activeTab: "notes", aiModels: models });
+
+    const select = screen.getByRole("combobox", { name: /ai model/i });
+    expect(select).toHaveValue("");
+    expect(screen.getByRole("option", { name: /auto/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /flash lite 3\.5/i })).toBeInTheDocument();
+  });
+
+  it("reports the chosen model so it can be remembered and sent", async () => {
+    const onAiModelChange = vi.fn();
+    renderSidebar({ activeTab: "notes", aiModels: models, onAiModelChange });
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: /ai model/i }),
+      "gemini-3.8-flash"
+    );
+
+    expect(onAiModelChange).toHaveBeenCalledWith("gemini-3.8-flash");
+  });
+
+  it("shows no picker when the server offers no choice", () => {
+    renderSidebar({ activeTab: "notes", aiModels: [] });
+    expect(screen.queryByRole("combobox", { name: /ai model/i })).not.toBeInTheDocument();
+  });
+
+  it("locks the picker while a read is running, so the model cannot change mid-flight", () => {
+    renderSidebar({ activeTab: "notes", aiModels: models, transcribing: true });
+    expect(screen.getByRole("combobox", { name: /ai model/i })).toBeDisabled();
+  });
+});

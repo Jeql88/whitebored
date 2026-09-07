@@ -144,11 +144,12 @@ test("a non-429 client error is not retried and propagates (fail loud)", async (
   assert.equal(stub.calls.length, 1); // no retry on an unexpected error
 });
 
-test("a persistent 429 gives up after maxRetries and propagates", async () => {
+test("a persistent 429 gives up once EVERY model is exhausted, then propagates", async () => {
   const stub = createGeminiStub();
-  stub.enqueueRateLimit();
-  stub.enqueueRateLimit();
-  stub.enqueueRateLimit(); // three 429s; maxRetries=2 → 1 initial + 2 retries
+  // A 429 now means "this model is out" and the request falls through to the next
+  // one, so exhausting the request means exhausting every model's retries — which
+  // is the point: a single model's quota no longer fails the whole read.
+  stub.alwaysRateLimit();
 
   const clock = createFakeClock();
   const gemini = createGemini({
@@ -160,9 +161,13 @@ test("a persistent 429 gives up after maxRetries and propagates", async () => {
   const pending = gemini.generate({ userId: "u1", prompt: "x" });
   const assertion = assert.rejects(pending, (err) => err.status === 429);
 
-  await clock.tick(10000); // advance past all backoffs
+  await clock.tick(60000); // advance past every model's backoffs
   await assertion;
-  assert.equal(stub.calls.length, 3);
+  // Each model got its full retry budget before the request gave up, and every
+  // model was tried — a quota wall on one no longer ends the read.
+  assert.ok(stub.calls.length > 3, "expected more than one model to be tried");
+  const modelsTried = new Set(stub.calls.map((c) => c.model));
+  assert.ok(modelsTried.size > 1, "expected the request to fall through models");
 });
 
 test("a per-day quota 429 fails immediately instead of exhausting the backoff", async () => {
@@ -233,4 +238,48 @@ test("no daily budget configured means no daily limit is enforced", async () => 
     assert.equal(r.status, "ok", "no call is refused when no daily budget is set");
   }
   assert.equal(stub.calls.length, 15);
+});
+
+test("a congested model falls through to the next instead of failing the request", async () => {
+  // 503 "high demand" is the failure that made board reads unusable: one busy
+  // model took the whole read down. It must cost a retry on another model, not
+  // the user's work.
+  const stub = createGeminiStub();
+  stub.enqueueError(Object.assign(new Error("high demand"), { status: 503 }));
+  stub.enqueue({ text: "read on the next model" });
+
+  const gemini = createGemini({ client: stub, clock: createFakeClock() });
+  const result = await gemini.generate({ userId: "u1", job: "read" });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.response.text, "read on the next model");
+  // Two different models were used — the second answered.
+  assert.notEqual(stub.calls[0].model, stub.calls[1].model);
+});
+
+test("a preferred model is tried first, and a bad preference is ignored", async () => {
+  const stub = createGeminiStub();
+  stub.enqueue({ text: "ok" });
+  const gemini = createGemini({ client: stub, clock: createFakeClock() });
+
+  await gemini.generate({ userId: "u1", job: "read", model: "gemini-3.8-flash" });
+  assert.equal(stub.calls[0].model, "gemini-3.8-flash");
+
+  // An unknown id must not reach the API — it would 404 on every crop.
+  const stub2 = createGeminiStub();
+  stub2.enqueue({ text: "ok" });
+  await createGemini({ client: stub2, clock: createFakeClock() })
+    .generate({ userId: "u1", job: "read", model: "not-a-real-model" });
+  assert.notEqual(stub2.calls[0].model, "not-a-real-model");
+});
+
+test("a request error is NOT retried across models", async () => {
+  // A 400 means the request itself is wrong; trying four more models spends
+  // quota to learn the same thing.
+  const stub = createGeminiStub();
+  stub.enqueueError(Object.assign(new Error("Unable to process input image"), { status: 400 }));
+
+  const gemini = createGemini({ client: stub, clock: createFakeClock() });
+  await assert.rejects(gemini.generate({ userId: "u1", job: "read" }), (e) => e.status === 400);
+  assert.equal(stub.calls.length, 1, "expected exactly one attempt");
 });

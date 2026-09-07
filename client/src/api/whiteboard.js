@@ -191,12 +191,12 @@ export function saveScope(id, scope) {
 
 // Read the board: the client groups + rasterizes crops, the server runs them
 // through recognize() and returns the structured artifact the review UI corrects.
-export function transcribeBoard(id, crops) {
+export function transcribeBoard(id, crops, { model } = {}) {
   // Reading a busy board is several batched model calls over many images; the
   // default 60s aborts it while it is still working.
   return apiFetch(`${WB}/${id}/transcription`, {
     method: "POST",
-    body: { crops },
+    body: { crops, model },
     timeoutMs: 240000,
   });
 }
@@ -208,4 +208,11 @@ export function getTranscription(id) {
 // Persist the user's corrections — notes generate from THIS, not the raw read.
 export function saveTranscription(id, artifact) {
   return apiFetch(`${WB}/${id}/transcription`, { method: "PUT", body: { artifact } });
+}
+
+// The AI models this deployment offers, for the model picker. Driven by the
+// server's registry so the list cannot drift from what the backend accepts.
+export async function getAiModels() {
+  const data = await apiFetch(`${WB}/ai/models`);
+  return Array.isArray(data?.models) ? data.models : [];
 }
