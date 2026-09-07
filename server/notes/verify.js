@@ -106,6 +106,18 @@ function keyTerms(line) {
 // board": a line that mixes a real board term with an invented one is still
 // introducing something the user didn't draw, so it is dropped. A line with no key
 // terms (empty, or all stopwords) is not traceable and is dropped too.
+// How much of a line's content must trace to the board for it to survive. Not
+// all of it: the prompt asks for complete sentences, and a sentence needs
+// connecting words the board never contains ("known", "called", "shown", "using").
+// Requiring EVERY term rejected precisely the well-written lines the prompt asks
+// for — the better the notes read, the more of them were silently discarded, which
+// is how a board full of legible text produced no notes at all.
+//
+// A majority still catches what the gate is actually for. An invented claim brings
+// a cluster of unfamiliar terms with it ("photosynthesis", "glucose", "sunlight")
+// and falls well under the bar; a real line dressed in ordinary English clears it.
+const MIN_GROUNDED_RATIO = 0.6;
+
 function verifyLine(line, transcription) {
   const terms = keyTerms(line);
   if (terms.length === 0) return false;
@@ -116,7 +128,9 @@ function verifyLine(line, transcription) {
         : transcriptionText(transcription)
     )
   );
-  return terms.every((t) => haystack.has(t));
+
+  const grounded = terms.filter((t) => haystack.has(t)).length;
+  return grounded / terms.length >= MIN_GROUNDED_RATIO;
 }
 
 module.exports = { verifyLine, transcriptionText, keyTerms, tokenize };

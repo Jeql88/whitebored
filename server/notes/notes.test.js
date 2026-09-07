@@ -632,3 +632,47 @@ test("a line asserting something the board never said is still dropped", async (
 
   assert.deepEqual(record.lines, [], "invented facts must never reach the notes");
 });
+
+// --- the grounding gate must not reject well-written notes -------------------
+
+test("a line phrased as a sentence still verifies when its CONTENT is on the board", () => {
+  // The prompt asks for complete sentences, and a sentence needs connecting words
+  // the board never contains ("known", "called", "shown"). Requiring EVERY term to
+  // appear rejected exactly the well-written lines the prompt asks for — the
+  // better the notes, the more of them were silently discarded.
+  const src = transcriptionText({
+    entries: [{ segments: [{ text: "Hive Leader" }, { text: "Queen Bee" }] }],
+  });
+
+  assert.equal(
+    verifyLine({ text: "The Hive Leader is known as the Queen Bee", sourceElementIds: ["a"] }, src),
+    true
+  );
+});
+
+test("a line that invents content is still rejected", () => {
+  // The gate's actual job: content the board never mentioned must not survive.
+  const src = transcriptionText({
+    entries: [{ segments: [{ text: "Hive Leader" }, { text: "Queen Bee" }] }],
+  });
+
+  assert.equal(
+    verifyLine({ text: "Photosynthesis converts sunlight into glucose", sourceElementIds: ["a"] }, src),
+    false
+  );
+});
+
+test("a line that mixes one real term with invented content is rejected", () => {
+  // The dangerous case — a hallucination wearing one true word as camouflage.
+  const src = transcriptionText({
+    entries: [{ segments: [{ text: "Hive Leader" }, { text: "Queen Bee" }] }],
+  });
+
+  assert.equal(
+    verifyLine(
+      { text: "Hive Leader discovered penicillin during mitosis in Antarctica", sourceElementIds: ["a"] },
+      src
+    ),
+    false
+  );
+});
