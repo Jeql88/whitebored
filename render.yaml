@@ -1,54 +1,64 @@
-services:
-  - type: web
-    name: whitebored-wl8r
-    runtime: node
-    plan: free
-    branch: main
-    # --include=dev forces devDependencies (vite, tailwind plugin) to install
-    # even though NODE_ENV=production, which otherwise skips them and 127s.
-    buildCommand: npm install --include=dev && npm run build
-    startCommand: npm start
-    healthCheckPath: /healthz
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: MONGO_URI
-        sync: false
-      - key: BETTER_AUTH_SECRET
-        sync: false
-      # MUST match this service's own public URL or auth callbacks break. If the
-      # service is recreated under a different name, update this to the new
-      # hostname (and the Google OAuth redirect URI) before signing in.
-      - key: BETTER_AUTH_URL
-        value: https://whitebored-wl8r.onrender.com
-      - key: CLIENT_ORIGIN
-        value: https://whitebored-client.vercel.app
-      - key: RESEND_API_KEY
-        sync: false
-      - key: MAIL_FROM
-        sync: false
-      - key: GOOGLE_VISION_KEY
-        sync: false
-      # Sketch-to-Notes: every AI feature routes through the central Gemini module.
-      # Without a key the module returns null and notes/cards/chat/coverage all
-      # degrade to "not configured" rather than erroring.
-      # Set the value in the dashboard; verify with /healthz/config.
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-3.5-flash-lite
-      - key: GEMINI_EMBED_MODEL
-        value: gemini-embedding-001
-      # Calls per user per day before the app refuses locally, with a clear
-      # message, instead of spending one to be told 429 mid-board-read. The free
-      # tier's real limit is a DAILY cap (~20 generate calls), not a per-minute
-      # one. Set to 0 for a paid key with no meaningful daily quota.
-      - key: GEMINI_DAILY_BUDGET
-        value: "20"
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: ADMIN_USER_IDS
-        sync: false
+# Render configuration — DOCUMENTATION ONLY, not an active Blueprint.
+#
+# This file deliberately declares no `services:`. It used to, and Render treats a
+# blueprint as the source of truth: it re-created the declared service on every
+# sync, so a service deleted in the dashboard kept coming back and the account
+# ended up with two. The live service is created and owned in the DASHBOARD; this
+# file records what that service needs so the settings are versioned with the code
+# rather than living only in a web form.
+#
+# Restoring blueprint management later means re-adding a `services:` block AND
+# deleting the dashboard-created service first — otherwise the pair reappears.
+#
+# ---------------------------------------------------------------------------
+# Service settings (Render dashboard → the web service)
+# ---------------------------------------------------------------------------
+#   Root Directory:      (blank — the repo root; npm workspaces build from there)
+#   Build Command:       npm install --include=dev && npm run build
+#                        `--include=dev` is required: NODE_ENV=production
+#                        otherwise skips devDependencies, and vite + the tailwind
+#                        plugin live there, so the build exits 127 without it.
+#   Start Command:       npm start
+#   Health Check Path:   /healthz
+#   Branch:              main   (auto-deploy on push)
+#
+# ---------------------------------------------------------------------------
+# Environment variables
+# ---------------------------------------------------------------------------
+# Required — the server exits at boot without these:
+#   MONGO_URI              the Atlas connection string (no surrounding quotes;
+#                          Render takes the value literally)
+#   BETTER_AUTH_SECRET     session signing secret
+#   BETTER_AUTH_URL        MUST equal this service's own public URL, or OAuth
+#                          callbacks break. Changing the service name means
+#                          changing this AND the Google OAuth redirect URI.
+#   CLIENT_ORIGIN          the Vercel frontend origin, for CORS
+#   NODE_ENV               production
+#
+# Optional — each feature degrades cleanly when its key is absent:
+#   GEMINI_API_KEY         enables every AI feature (notes, chat, cards,
+#                          fact-check, coverage). Without it the central Gemini
+#                          module returns null and those report "not configured"
+#                          rather than erroring. Verify with /healthz/config.
+#   GOOGLE_VISION_KEY      the older OCR path (search index + copy-text modal)
+#   GOOGLE_CLIENT_ID       Google sign-in
+#   GOOGLE_CLIENT_SECRET
+#   RESEND_API_KEY         transactional email
+#   MAIL_FROM
+#   ADMIN_USER_IDS         comma-separated user ids granted the admin area
+#
+# Deliberately NOT set in the dashboard — the code's defaults are correct and a
+# dashboard value would OVERRIDE them, which is how a retired model got pinned
+# once already:
+#   GEMINI_MODEL           defaults to gemini-3.5-flash-lite (fastest; measured
+#                          ~0.7s against ~30s for gemini-3.6-flash). The server
+#                          falls through to other models on 429/503 by itself.
+#   GEMINI_EMBED_MODEL     defaults to gemini-embedding-001
+#
+# One env var that IS worth setting in the dashboard:
+#   GEMINI_DAILY_BUDGET    per-user calls per day before the app refuses locally
+#                          with a clear message, instead of spending a call to be
+#                          told 429 mid-board-read. Defaults to 0 (NO cap), so
+#                          set it to match the key's real quota — the Gemini free
+#                          tier's binding limit is a daily cap, not a per-minute
+#                          one. "20" suits a free key.
