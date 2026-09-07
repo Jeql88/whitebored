@@ -238,3 +238,84 @@ test("a speck sitting inside real writing still rides along with it", () => {
   assert.equal(crops.length, 1);
   assert.equal(crops[0].sourceElementIds.length, 2);
 });
+
+test("large drawn strokes do not chain the board into one crop", () => {
+  // A real board: 180 freedraw strokes with a MEDIAN height of 385px — drawn
+  // shapes and sweeping marks, not handwriting. The overlap tolerance scaled with
+  // stroke height (dy <= height * 0.5 = 192px for a 385px stroke), so strokes far
+  // apart still counted as "the same line" and merged transitively: one crop
+  // swallowed 132 of them and read back as nothing.
+  const strokes = [];
+  for (let i = 0; i < 12; i++) {
+    strokes.push(
+      inkEl(`big${i}`, { x: i * 500, y: i * 400, width: 380, height: 385 })
+    );
+  }
+
+  const crops = groupCrops(strokes);
+  const biggest = Math.max(...crops.map((c) => c.sourceElementIds.length));
+
+  assert.ok(
+    biggest < strokes.length / 2,
+    `no crop should hold most of the board (biggest held ${biggest} of ${strokes.length})`
+  );
+});
+
+test("handwriting on one line still merges into a word", () => {
+  // The cap must not go so far that letters split apart.
+  const strokes = [];
+  for (let i = 0; i < 5; i++) {
+    strokes.push(inkEl(`h${i}`, { x: i * 15, y: 100, width: 12, height: 20 }));
+  }
+
+  const crops = groupCrops(strokes);
+  assert.equal(crops.length, 1);
+  assert.equal(crops[0].sourceElementIds.length, 5);
+});
+
+test("a large drawn shape does not absorb the small strokes it overlaps", () => {
+  // The real mechanism behind the 132-stroke blob, and no distance rule can reach
+  // it: a big drawn shape physically CONTAINS smaller strokes, so they overlap
+  // outright (gap 0 on both axes) and merge under any proximity budget — then
+  // chain transitively across the drawing. A board of 180 strokes had 755 such
+  // overlapping pairs; excluding strokes larger than handwriting left 1.
+  const shape = inkEl("shape", { x: 0, y: 0, width: 362, height: 428 });
+  const inside = [
+    inkEl("a", { x: 40, y: 60, width: 20, height: 44 }),
+    inkEl("b", { x: 90, y: 60, width: 43, height: 58 }),
+  ];
+  const elsewhere = inkEl("far", { x: 900, y: 900, width: 18, height: 20 });
+
+  const crops = groupCrops([shape, ...inside, elsewhere]);
+  const biggest = Math.max(...crops.map((c) => c.sourceElementIds.length));
+
+  assert.ok(
+    biggest < 4,
+    `a shape must not swallow everything it overlaps (biggest crop held ${biggest})`
+  );
+});
+
+test("a drawing of many overlapping strokes does not collapse into one crop", () => {
+  // Closer to the real board: large drawn strokes scattered across the canvas,
+  // each overlapping several small ones. Individually harmless; together they
+  // chain, because every overlap is a merge and merges are transitive.
+  const els = [];
+  for (let g = 0; g < 6; g++) {
+    const ox = g * 600;
+    // A big drawn shape...
+    els.push(inkEl(`big${g}`, { x: ox, y: 0, width: 362, height: 428 }));
+    // ...with small strokes sitting inside it.
+    for (let i = 0; i < 5; i++) {
+      els.push(inkEl(`s${g}_${i}`, { x: ox + 40 + i * 50, y: 60, width: 20, height: 44 }));
+    }
+  }
+
+  const crops = groupCrops(els);
+  const biggest = Math.max(...crops.map((c) => c.sourceElementIds.length));
+
+  // Six separate drawings must stay separate, not become one 36-element crop.
+  assert.ok(
+    biggest <= els.length / 3,
+    `six drawings should not merge (biggest crop held ${biggest} of ${els.length})`
+  );
+});

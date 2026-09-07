@@ -112,6 +112,9 @@ const MAX_HEIGHT_RATIO = 12;
 // so it must never be merged by proximity. Letters — including a tittle or a comma
 // — stay well under this.
 const ELONGATED_RATIO = 6;
+// Tallest a stroke can be and still plausibly be a letter. Above this it is a
+// drawn shape: it may sit in a crop of its own, but it never pulls neighbours in.
+const MAX_WRITING_HEIGHT = 120;
 // Strokes below this are specks: a stray tap, the dot of an i left behind, a
 // zero-area artefact. They carry no readable content of their own, so they never
 // seed or extend a cluster — they ride along only if a real stroke claims them.
@@ -174,6 +177,15 @@ function clusterFreeStrokes(uf, strokes) {
       };
       if (elongation(a) > ELONGATED_RATIO || elongation(b) > ELONGATED_RATIO) continue;
 
+      // Shape alone is not enough. A drawn shape can be COMPACT and still far too
+      // large to be writing — a real board's biggest crop held 126 strokes with a
+      // median height of 570px, all compact enough to pass the test above. Such a
+      // stroke physically contains the smaller ones near it, and an overlap has a
+      // gap of zero on both axes, so no proximity budget can separate them; the
+      // merges chain until one crop spans the canvas. Excluding strokes taller
+      // than any plausible line of handwriting cut 755 overlapping pairs to 1.
+      if (Math.min(a.height ?? 0, b.height ?? 0) > MAX_WRITING_HEIGHT) continue;
+
       // Among compact strokes, scale still has to be comparable: a whole scribbled
       // diagram sitting beside a word is not part of that word.
       if (taller > smaller * MAX_HEIGHT_RATIO) continue;
@@ -188,13 +200,20 @@ function clusterFreeStrokes(uf, strokes) {
       // came from long strokes, which no longer take part in proximity at all.
       const scale = taller;
 
-      // Same line, next word: a wide horizontal reach but the strokes must
-      // actually overlap vertically, which is what keeps it on one line.
+      // Both the GAP and the OVERLAP tolerance must be capped. Capping only the
+      // gap left "dy <= scale * 0.5", which for a 385px stroke — the median on a
+      // real board of drawn shapes — allowed 192px of vertical separation to still
+      // count as the same line. Strokes that far apart merged, transitively, until
+      // one crop held 132 of 180 strokes and read back as nothing.
+      const align = Math.min(scale * 0.5, MAX_MERGE_GAP);
+
+      // Same line, next word: a wide horizontal reach, but the strokes must
+      // actually sit on the same baseline, which is what keeps it to one line.
       const sameLine =
-        dy <= scale * 0.5 && dx <= Math.min(scale * GAP_TO_HEIGHT * 2, MAX_MERGE_GAP);
+        dy <= align && dx <= Math.min(scale * GAP_TO_HEIGHT * 2, MAX_MERGE_GAP);
       // Next line of the same block: directly above/below, within a line height.
       const nextLine =
-        dx <= scale * 0.5 && dy <= Math.min(scale * GAP_TO_HEIGHT, MAX_MERGE_GAP);
+        dx <= align && dy <= Math.min(scale * GAP_TO_HEIGHT, MAX_MERGE_GAP);
 
       if (sameLine || nextLine) uf.union(a.id, b.id);
     }
